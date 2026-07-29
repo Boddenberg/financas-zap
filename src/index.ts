@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     console.log("\nAguardando a leitura do QR Code...");
   });
 
-  client.on("authenticated", () => {
+  client.once("authenticated", () => {
     console.log("Autenticação realizada com sucesso. Preparando o cliente...");
   });
 
@@ -98,7 +98,9 @@ async function main(): Promise<void> {
 
       try {
         const result = await sendTestMessage(client as Client, config);
-        console.log(`Mensagem de teste enviada com sucesso para ${result.destinationDescription}.`);
+        console.log(
+          `Mensagem de teste enviada para ${result.destinationDescription}; o WhatsApp confirmou ${result.acknowledgementDescription}.`,
+        );
         await shutdown("Teste concluído. Encerrando o cliente do WhatsApp.", 0);
       } catch (error) {
         console.error(`Falha ao enviar a mensagem de teste: ${errorMessage(error)}`);

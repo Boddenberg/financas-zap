@@ -78,8 +78,9 @@ Na primeira vez:
 3. Acesse **Configurações/Menu > Aparelhos conectados > Conectar um aparelho**.
 4. Escaneie o QR Code exibido no terminal.
 5. Aguarde as mensagens `Autenticação realizada com sucesso`, `Cliente do WhatsApp pronto` e `Conta conectada`.
-6. O aplicativo enviará a mensagem configurada uma única vez e mostrará `Mensagem de teste enviada com sucesso`.
-7. Depois do envio, o cliente será encerrado automaticamente.
+6. O aplicativo enviará a mensagem configurada uma única vez e aguardará a confirmação do servidor do WhatsApp.
+7. O sucesso só será mostrado depois de aparecer `o WhatsApp confirmou o recebimento pelo servidor do WhatsApp`.
+8. Depois da confirmação, o cliente será encerrado automaticamente.
 
 Abra a conversa de destino no WhatsApp e confirme que o `Oi` apareceu. Quando `SEND_TO_SELF=true`, procure a conversa com você mesmo. Se a sua conta ou versão do WhatsApp não aceitar o envio para o próprio identificador, configure `SEND_TO_SELF=false` e use em `TARGET_PHONE` outro número que esteja registrado no WhatsApp.
 
@@ -128,6 +129,7 @@ Se uma das pastas ainda não existir, o PowerShell poderá mostrar um aviso inof
 - **Falha ao iniciar o Chromium:** execute `npm install` novamente. Para diagnóstico, altere temporariamente `HEADLESS=false` e rode `npm run dev`.
 - **Falha de autenticação:** encerre o programa, apague `.wwebjs_auth/` e `.wwebjs_cache/` e escaneie um novo QR Code.
 - **Número não registrado:** confirme `SEND_TO_SELF=false`, o código do país, o DDD e se o número possui WhatsApp.
+- **Envio sem confirmação:** o programa aguarda até 30 segundos pelo servidor. Se houver timeout, confira a conexão e tente novamente; o log não apresentará sucesso sem essa confirmação.
 - **Sessão desconectada:** confira em **Aparelhos conectados** no celular. Se necessário, remova a sessão local e conecte outra vez.
 - **O terminal parece travado:** ele pode estar aguardando o QR Code ser lido. Use `Ctrl+C` para encerrar com segurança.
 
