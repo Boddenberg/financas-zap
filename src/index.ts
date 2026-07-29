@@ -1,42 +1,23 @@
 import qrcode from "qrcode-terminal";
-import { Client } from "whatsapp-web.js";
+import type { Client } from "whatsapp-web.js";
+import { CleaningMonitor } from "./cleaning-monitor";
 import { ConfigError, loadConfig } from "./config";
-import { createWhatsAppClient, sendTestMessage } from "./whatsapp-client";
-
-let client: Client | undefined;
-let sendStarted = false;
-let shuttingDown = false;
+import { FinancasClient } from "./financas-client";
+import { StateStore } from "./state-store";
+import {
+  createWhatsAppClient,
+  listGroups,
+  resolveDestinations,
+  sendTestMessage,
+} from "./whatsapp-client";
 
 function errorMessage(error: unknown): string {
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "Erro desconhecido.";
+  return error instanceof Error ? error.message : "Erro desconhecido.";
 }
 
-async function shutdown(message: string, exitCode: number): Promise<void> {
-  if (shuttingDown) {
-    return;
-  }
-
-  shuttingDown = true;
-  console.log(message);
-
-  if (client) {
-    try {
-      await client.destroy();
-    } catch {
-      console.error("Não foi possível encerrar o cliente do WhatsApp de forma limpa.");
-    }
-  }
-
-  process.exit(exitCode);
-}
-
-function connectedAccountDescription(whatsappClient: Client): string {
-  const accountId = whatsappClient.info?.wid?._serialized;
-  const pushName = whatsappClient.info?.pushname?.trim();
+function connectedAccountDescription(client: Client): string {
+  const accountId = client.info?.wid?._serialized;
+  const pushName = client.info?.pushname?.trim();
 
   if (pushName && accountId) {
     return `${pushName} (${accountId.replace("@c.us", "")})`;
@@ -47,6 +28,46 @@ function connectedAccountDescription(whatsappClient: Client): string {
   }
 
   return "informação não disponível";
+}
+
+async function waitUntilReady(client: Client, signal: AbortSignal): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => {
+      client.off("ready", ready);
+      client.off("auth_failure", authFailure);
+      client.off("disconnected", disconnected);
+      signal.removeEventListener("abort", aborted);
+    };
+    const ready = (): void => {
+      cleanup();
+      resolve();
+    };
+    const authFailure = (): void => {
+      cleanup();
+      reject(
+        new Error(
+          "Falha de autenticação. Se a sessão estiver corrompida, remova .wwebjs_auth e tente novamente.",
+        ),
+      );
+    };
+    const disconnected = (reason: unknown): void => {
+      cleanup();
+      reject(new Error(`Sessão do WhatsApp desconectada (${String(reason)}).`));
+    };
+    const aborted = (): void => {
+      cleanup();
+      reject(new Error("Inicialização interrompida."));
+    };
+
+    client.once("ready", ready);
+    client.once("auth_failure", authFailure);
+    client.once("disconnected", disconnected);
+    signal.addEventListener("abort", aborted, { once: true });
+    void client.initialize().catch((error: unknown) => {
+      cleanup();
+      reject(error);
+    });
+  });
 }
 
 async function main(): Promise<void> {
@@ -60,75 +81,36 @@ async function main(): Promise<void> {
     } else {
       console.error(`Falha ao carregar a configuração: ${errorMessage(error)}`);
     }
-
     process.exitCode = 1;
     return;
   }
 
-  client = createWhatsAppClient(config);
+  const abortController = new AbortController();
+  const client = createWhatsAppClient(config);
+  const stateStore = new StateStore(config.statePath);
+  let disconnectedReason: unknown;
 
+  const stop = (message: string): void => {
+    if (!abortController.signal.aborted) {
+      console.log(message);
+      abortController.abort();
+    }
+  };
+
+  process.once("SIGINT", () => stop("\nInterrupção recebida. Encerrando..."));
+  process.once("SIGTERM", () => stop("Solicitação de encerramento recebida."));
+  client.on("disconnected", (reason) => {
+    disconnectedReason = reason;
+    stop(`Sessão do WhatsApp desconectada (${String(reason)}).`);
+  });
   client.on("qr", (qr) => {
     console.log("\nQR Code recebido.");
-    console.log("No WhatsApp, abra Aparelhos conectados > Conectar um aparelho e escaneie:\n");
+    console.log("No WhatsApp, abra Aparelhos conectados > Conectar um aparelho:\n");
     qrcode.generate(qr, { small: true });
     console.log("\nAguardando a leitura do QR Code...");
   });
-
   client.once("authenticated", () => {
-    console.log("Autenticação realizada com sucesso. Preparando o cliente...");
-  });
-
-  client.on("auth_failure", () => {
-    void shutdown(
-      "Falha de autenticação. Se a sessão local estiver corrompida, apague .wwebjs_auth e tente novamente.",
-      1,
-    );
-  });
-
-  client.once("ready", () => {
-    void (async () => {
-      if (sendStarted) {
-        return;
-      }
-
-      sendStarted = true;
-      console.log("Cliente do WhatsApp pronto.");
-      console.log(`Conta conectada: ${connectedAccountDescription(client as Client)}`);
-      console.log("Enviando a mensagem de teste...");
-
-      try {
-        const result = await sendTestMessage(client as Client, config);
-        console.log(
-          `Mensagem de teste enviada para ${result.destinationDescription}; o WhatsApp confirmou ${result.acknowledgementDescription}.`,
-        );
-        await shutdown("Teste concluído. Encerrando o cliente do WhatsApp.", 0);
-      } catch (error) {
-        console.error(`Falha ao enviar a mensagem de teste: ${errorMessage(error)}`);
-        await shutdown("Teste encerrado com erro.", 1);
-      }
-    })();
-  });
-
-  client.on("disconnected", (reason) => {
-    void shutdown(`Sessão do WhatsApp desconectada (${String(reason)}).`, 1);
-  });
-
-  process.once("SIGINT", () => {
-    void shutdown("\nInterrupção recebida. Encerrando o cliente do WhatsApp...", 130);
-  });
-
-  process.once("SIGTERM", () => {
-    void shutdown("Solicitação de encerramento recebida.", 143);
-  });
-
-  process.once("uncaughtException", (error) => {
-    console.error(`Erro inesperado: ${errorMessage(error)}`);
-    void shutdown("Encerrando após erro inesperado.", 1);
-  });
-
-  process.once("unhandledRejection", (error) => {
-    console.error(`Falha assíncrona inesperada: ${errorMessage(error)}`);
-    void shutdown("Encerrando após erro inesperado.", 1);
+    console.log("Autenticação do WhatsApp realizada. Preparando o cliente...");
   });
 
   console.log("Iniciando o cliente local do WhatsApp...");
@@ -139,10 +121,58 @@ async function main(): Promise<void> {
   );
 
   try {
-    await client.initialize();
+    if (config.mode === "watch") {
+      // O marco nasce antes do QR/login para não abrir uma janela sem monitoramento
+      // durante a primeira inicialização, que pode levar alguns minutos.
+      await stateStore.loadOrCreate();
+    }
+    await waitUntilReady(client, abortController.signal);
+    console.log(`WhatsApp pronto: ${connectedAccountDescription(client)}.`);
+
+    if (config.mode === "list-groups") {
+      await listGroups(client);
+      return;
+    }
+
+    if (config.mode === "test-message") {
+      await sendTestMessage(client, config);
+      return;
+    }
+
+    const finances = new FinancasClient(config);
+    console.log("Entrando no Finanças para acompanhar o app Casa...");
+    await finances.connect();
+    const destinations = await resolveDestinations(client, config);
+    console.log(
+      `Destino dos avisos: ${destinations
+        .map((destination) => destination.description)
+        .join(" e ")}.`,
+    );
+    const monitor = new CleaningMonitor(
+      client,
+      finances,
+      destinations,
+      stateStore,
+      config,
+    );
+    await monitor.run(abortController.signal);
+
+    if (disconnectedReason !== undefined) {
+      throw new Error(
+        `A sessão do WhatsApp foi desconectada (${String(disconnectedReason)}).`,
+      );
+    }
   } catch (error) {
-    console.error(`Falha ao iniciar o cliente do WhatsApp: ${errorMessage(error)}`);
-    await shutdown("Não foi possível iniciar o teste.", 1);
+    if (!abortController.signal.aborted || disconnectedReason !== undefined) {
+      console.error(`Finanças Zap encerrado com erro: ${errorMessage(error)}`);
+      process.exitCode = 1;
+    }
+  } finally {
+    try {
+      await client.destroy();
+    } catch {
+      console.error("Não foi possível encerrar o cliente do WhatsApp de forma limpa.");
+    }
   }
 }
 

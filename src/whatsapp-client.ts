@@ -1,8 +1,23 @@
 import { Client, LocalAuth, MessageAck } from "whatsapp-web.js";
-import type { Message } from "whatsapp-web.js";
+import type { Chat, Message } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 
 const SERVER_ACK_TIMEOUT_MS = 30_000;
+
+export type WhatsAppDestination = {
+  key: string;
+  id: string;
+  description: string;
+};
+
+function sameBrazilianNumber(first: string, second: string): boolean {
+  const normalizeLegacyMobile = (value: string): string =>
+    /^55\d{2}9\d{8}$/.test(value)
+      ? `${value.slice(0, 4)}${value.slice(5)}`
+      : value;
+
+  return normalizeLegacyMobile(first) === normalizeLegacyMobile(second);
+}
 
 export function createWhatsAppClient(config: AppConfig): Client {
   return new Client({
@@ -27,21 +42,21 @@ export function createWhatsAppClient(config: AppConfig): Client {
 
 function acknowledgementDescription(ack: MessageAck): string {
   if (ack >= MessageAck.ACK_READ) {
-    return "a leitura no aparelho de destino";
+    return "leitura confirmada";
   }
 
   if (ack >= MessageAck.ACK_DEVICE) {
-    return "a entrega ao aparelho de destino";
+    return "entrega no aparelho confirmada";
   }
 
-  return "o recebimento pelo servidor do WhatsApp";
+  return "recebimento pelo servidor confirmado";
 }
 
-async function sendAndWaitForServerAcknowledgement(
+export async function sendAndWaitForServerAcknowledgement(
   client: Client,
   destinationId: string,
   content: string,
-): Promise<MessageAck> {
+): Promise<string> {
   const observedAcknowledgements = new Map<string, MessageAck>();
   let targetMessageId: string | undefined;
   let handleTargetAcknowledgement: ((ack: MessageAck) => void) | undefined;
@@ -71,14 +86,14 @@ async function sendAndWaitForServerAcknowledgement(
     }
 
     if (currentAcknowledgement >= MessageAck.ACK_SERVER) {
-      return currentAcknowledgement;
+      return acknowledgementDescription(currentAcknowledgement);
     }
 
-    return await new Promise<MessageAck>((resolve, reject) => {
+    const acknowledgement = await new Promise<MessageAck>((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(
           new Error(
-            "O WhatsApp não confirmou o recebimento da mensagem em até 30 segundos. A mensagem não será considerada enviada.",
+            "O WhatsApp não confirmou o recebimento da mensagem em até 30 segundos.",
           ),
         );
       }, SERVER_ACK_TIMEOUT_MS);
@@ -96,50 +111,99 @@ async function sendAndWaitForServerAcknowledgement(
         }
       };
     });
+    return acknowledgementDescription(acknowledgement);
   } finally {
     client.off("message_ack", acknowledgementListener);
   }
 }
 
-export async function sendTestMessage(
+export async function resolveDestinations(
   client: Client,
   config: AppConfig,
-): Promise<{ destinationDescription: string; acknowledgementDescription: string }> {
+): Promise<WhatsAppDestination[]> {
   if (!client.info?.wid) {
     throw new Error("O cliente ainda não forneceu os dados da conta conectada.");
   }
 
-  let destinationId: string;
-  let destinationDescription: string;
+  if (config.groupId) {
+    let chat: Chat;
 
-  if (config.sendToSelf) {
-    destinationId = client.info.wid._serialized;
-    destinationDescription = "a própria conta conectada";
-  } else {
-    if (!config.targetPhone) {
-      throw new Error("O número de destino não foi configurado.");
-    }
-
-    const registeredNumber = await client.getNumberId(config.targetPhone);
-
-    if (!registeredNumber) {
+    try {
+      chat = await client.getChatById(config.groupId);
+    } catch {
       throw new Error(
-        "O número informado em TARGET_PHONE não está registrado no WhatsApp ou não pôde ser localizado.",
+        "O grupo configurado não foi encontrado na conta conectada. Rode npm run list:groups para conferir o ID.",
       );
     }
 
-    destinationId = registeredNumber._serialized;
-    destinationDescription = `o número terminado em ${config.targetPhone.slice(-4)}`;
+    if (!chat.isGroup) {
+      throw new Error("WHATSAPP_GROUP_ID não aponta para um grupo do WhatsApp.");
+    }
+
+    return [
+      {
+        key: `group:${config.groupId}`,
+        id: config.groupId,
+        description: `o grupo "${chat.name}"`,
+      },
+    ];
   }
 
-  const acknowledgement = await sendAndWaitForServerAcknowledgement(
-    client,
-    destinationId,
-    config.testMessage,
-  );
+  const destinations: WhatsAppDestination[] = [];
+  const connectedPhone = client.info.wid.user.replace(/\D/g, "");
 
-  return {
-    destinationDescription,
-    acknowledgementDescription: acknowledgementDescription(acknowledgement),
-  };
+  for (const phone of config.targetPhones) {
+    const registeredNumber = sameBrazilianNumber(phone, connectedPhone)
+      ? client.info.wid
+      : await client.getNumberId(phone);
+
+    if (!registeredNumber) {
+      throw new Error(
+        `O número terminado em ${phone.slice(-4)} não está registrado no WhatsApp ou não pôde ser localizado.`,
+      );
+    }
+
+    destinations.push({
+      key: `phone:${phone}`,
+      id: registeredNumber._serialized,
+      description: `o número terminado em ${phone.slice(-4)}`,
+    });
+  }
+
+  return destinations;
+}
+
+export async function sendTestMessage(
+  client: Client,
+  config: AppConfig,
+): Promise<void> {
+  const destinations = await resolveDestinations(client, config);
+
+  for (const destination of destinations) {
+    const acknowledgement = await sendAndWaitForServerAcknowledgement(
+      client,
+      destination.id,
+      config.testMessage,
+    );
+    console.log(
+      `Mensagem de teste enviada para ${destination.description} (${acknowledgement}).`,
+    );
+  }
+}
+
+export async function listGroups(client: Client): Promise<void> {
+  const groups = (await client.getChats())
+    .filter((chat) => chat.isGroup)
+    .sort((first, second) => first.name.localeCompare(second.name, "pt-BR"));
+
+  if (groups.length === 0) {
+    console.log("A conta conectada não participa de nenhum grupo.");
+    return;
+  }
+
+  console.log("Grupos disponíveis:");
+
+  for (const group of groups) {
+    console.log(`- ${group.name}: ${group.id._serialized}`);
+  }
 }
