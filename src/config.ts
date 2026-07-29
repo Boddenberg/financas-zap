@@ -13,12 +13,8 @@ export type AppConfig = {
   targetPhones: string[];
   groupId?: string;
   financesApiUrl?: string;
-  supabaseUrl?: string;
-  supabaseAnonKey?: string;
-  supabaseEmail?: string;
-  supabasePassword?: string;
+  financesBridgeToken?: string;
   pollIntervalMs: number;
-  cleaningTerms: string[];
   timeZone: string;
 };
 
@@ -153,17 +149,16 @@ function readTargetPhones(groupId: string | undefined): string[] {
   return [...new Set(normalized)];
 }
 
-function readCleaningTerms(): string[] {
-  const terms = (process.env.CLEANING_TERMS || "limpeza")
-    .split(",")
-    .map((term) => term.trim())
-    .filter(Boolean);
+function readBridgeToken(): string {
+  const token = required("FINANCAS_BRIDGE_TOKEN");
 
-  if (terms.length === 0) {
-    throw new ConfigError("CLEANING_TERMS deve ter pelo menos um termo.");
+  if (!token.startsWith("casa_wpp_") || token.length < 40) {
+    throw new ConfigError(
+      "FINANCAS_BRIDGE_TOKEN não parece uma chave gerada pelo app Casa.",
+    );
   }
 
-  return terms;
+  return token;
 }
 
 function validateTimeZone(value: string): string {
@@ -200,10 +195,7 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     mode === "watch"
       ? {
           financesApiUrl: normalizeUrl("FINANCAS_API_URL", required("FINANCAS_API_URL")),
-          supabaseUrl: normalizeUrl("SUPABASE_URL", required("SUPABASE_URL")),
-          supabaseAnonKey: required("SUPABASE_ANON_KEY"),
-          supabaseEmail: required("SUPABASE_EMAIL"),
-          supabasePassword: required("SUPABASE_PASSWORD"),
+          financesBridgeToken: readBridgeToken(),
         }
       : {};
 
@@ -222,7 +214,6 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     targetPhones,
     groupId,
     pollIntervalMs: readPollInterval(),
-    cleaningTerms: readCleaningTerms(),
     timeZone: validateTimeZone(process.env.APP_TIMEZONE?.trim() || "America/Sao_Paulo"),
     ...watchConfig,
   };

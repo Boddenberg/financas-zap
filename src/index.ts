@@ -140,7 +140,7 @@ async function main(): Promise<void> {
     }
 
     const finances = new FinancasClient(config);
-    console.log("Entrando no Finanças para acompanhar o app Casa...");
+    console.log("Validando a chave restrita do app Casa...");
     await finances.connect();
     const destinations = await resolveDestinations(client, config);
     console.log(

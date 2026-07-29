@@ -12,18 +12,6 @@ import {
 } from "./whatsapp-client";
 import type { Client } from "whatsapp-web.js";
 
-function normalizeText(value: string): string {
-  return value
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLocaleLowerCase("pt-BR");
-}
-
-export function isCleaningEvent(event: CleaningEvent, terms: string[]): boolean {
-  const category = normalizeText(event.categoryName);
-  return terms.some((term) => category.includes(normalizeText(term)));
-}
-
 function formatPoints(points: number): string {
   return new Intl.NumberFormat("pt-BR", {
     maximumFractionDigits: 2,
@@ -99,7 +87,10 @@ export class CleaningMonitor {
   }
 
   private async processAvailable(state: BridgeState): Promise<number> {
-    const events = await this.finances.listEventsSince(state.cursorAt);
+    const events = await this.finances.listEventsSince(
+      state.cursorAt,
+      state.cursorIds,
+    );
     events.sort(
       (first, second) =>
         Date.parse(first.savedAt) - Date.parse(second.savedAt) ||
@@ -109,12 +100,6 @@ export class CleaningMonitor {
 
     for (const event of events) {
       if (!isAfterCursor(state, event)) {
-        continue;
-      }
-
-      if (!isCleaningEvent(event, this.config.cleaningTerms)) {
-        advanceCursor(state, event);
-        await this.store.save(state);
         continue;
       }
 

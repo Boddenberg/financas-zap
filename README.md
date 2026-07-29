@@ -3,9 +3,9 @@
 Ponte local entre o app Casa e o WhatsApp. Enquanto este processo estiver
 ligado, ele:
 
-1. entra no Finanças com a conta comum de um dos moradores;
-2. lê somente as novas atividades que essa conta pode ver na própria residência;
-3. seleciona os registros da categoria de limpeza;
+1. usa uma chave restrita gerada pelo próprio app Casa;
+2. lê somente os novos registros da categoria de limpeza daquela residência;
+3. não recebe fotos, observações nem outros dados do app;
 4. envia um aviso para os números configurados ou para um grupo;
 5. guarda a posição localmente para recuperar eventos após um reinício sem
    repetir o que já foi confirmado pelo servidor do WhatsApp.
@@ -30,34 +30,28 @@ Copy-Item .env.example .env
 
 ## Configuração
 
-Edite `.env`:
+No app, abra **Casa > Ajustes > WhatsApp**, gere a chave e clique em
+**Copiar configuração**. Cole as duas linhas no `.env`:
 
 ```env
 FINANCAS_API_URL="https://SEU-BACKEND/api/v1"
-SUPABASE_URL="https://SEU-PROJETO.supabase.co"
-SUPABASE_ANON_KEY="..."
-SUPABASE_EMAIL="morador@exemplo.com"
-SUPABASE_PASSWORD="..."
+FINANCAS_BRIDGE_TOKEN="casa_wpp_..."
 
 WHATSAPP_RECIPIENTS="5511999999999,5511888888888"
 WHATSAPP_GROUP_ID=""
 
-CLEANING_TERMS="limpeza"
 POLL_INTERVAL_SECONDS="15"
 HEADLESS="true"
 ```
 
-Use a URL e a chave **anon** do mesmo Supabase do Finanças. Não use
-`SUPABASE_SERVICE_ROLE_KEY`: a ponte autentica um morador e herda as proteções
-normais da residência.
+A chave da ponte não é um login e não é uma credencial administrativa do
+Supabase. O banco guarda somente o hash dela. Qualquer morador pode revogar ou
+rotacionar a chave em **Casa > Ajustes > WhatsApp**; a chave anterior para de
+funcionar imediatamente.
 
 Em `WHATSAPP_RECIPIENTS`, separe os números por vírgula. O código também aceita
 DDD + número e acrescenta o país configurado em `DEFAULT_COUNTRY_CODE` (55 por
 padrão).
-
-`CLEANING_TERMS` compara os termos com o nome da categoria, ignorando
-maiúsculas e acentos. O padrão `limpeza` reconhece a categoria “Limpeza e
-organização”, inclusive atividades personalizadas dentro dela.
 
 ## Primeira execução
 
@@ -122,8 +116,8 @@ npm run build
 
 ## Solução de problemas
 
-- **Login do Finanças falhou:** confirme URL, chave anon, e-mail e senha. O
-  login precisa pertencer ao casal que usa o app Casa.
+- **Chave recusada:** gere uma nova em **Casa > Ajustes > WhatsApp**, copie as
+  duas linhas novamente e reinicie a ponte.
 - **Número não registrado:** use país + DDD + número e confirme que o contato
   possui WhatsApp.
 - **Grupo não encontrado:** rode `npm run list:groups` novamente com a mesma
@@ -139,7 +133,7 @@ npm run build
 
 Não envie ao Git:
 
-- `.env`, que contém o login;
+- `.env`, que contém a chave revogável da ponte;
 - `.wwebjs_auth/`, que contém a sessão do WhatsApp;
 - `.wwebjs_cache/`;
 - `.runtime/`, que contém o cursor e as confirmações;
