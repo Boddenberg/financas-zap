@@ -1,19 +1,17 @@
 import type { AppConfig } from "./config";
+import type { components } from "./api-contract";
 
-type CleaningEventResponse = {
-  id?: unknown;
-  criado_por_nome?: unknown;
-  atividade_nome?: unknown;
-  ambiente_nome?: unknown;
-  pontuacao_total?: unknown;
-  compartilhada?: unknown;
-  salva_em?: unknown;
+type CleaningEventContract =
+  components["schemas"]["EventoLimpezaWhatsappCasa"];
+type CleaningEventsPageContract =
+  components["schemas"]["PaginaEventosLimpezaWhatsappCasa"];
+
+type UnknownFields<Contract> = {
+  [Field in keyof Contract]?: unknown;
 };
 
-type CleaningEventsPage = {
-  eventos?: unknown;
-  tem_mais?: unknown;
-};
+type CleaningEventResponse = UnknownFields<CleaningEventContract>;
+type CleaningEventsPage = UnknownFields<CleaningEventsPageContract>;
 
 export type CleaningEvent = {
   id: string;
