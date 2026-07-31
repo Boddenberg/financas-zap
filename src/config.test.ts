@@ -85,3 +85,27 @@ test("sem o endereço do backend a ponte não sobe: ninguém bateria o relógio"
     );
   });
 });
+
+test("sem argumento, a demonstração pede uma prévia de cada tipo", () => {
+  comAmbiente({}, () => {
+    assert.deepEqual(loadConfig(["--demo"]).demoFormats, [
+      "bloco",
+      "resumo_diario",
+      "panorama_semanal",
+      "panorama_mensal"
+    ]);
+  });
+});
+
+test("--demo=<tipo> pede só aquela prévia, e recusa um tipo que não existe", () => {
+  comAmbiente({}, () => {
+    assert.deepEqual(loadConfig(["--demo=panorama_mensal"]).demoFormats, [
+      "panorama_mensal"
+    ]);
+    assert.deepEqual(loadConfig(["--demo=inventado"]).demoFormats, [undefined]);
+    assert.throws(
+      () => loadConfig(["--demo=semana_que_vem"]),
+      (error) => error instanceof ConfigError
+    );
+  });
+});

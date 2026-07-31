@@ -26,6 +26,7 @@ function config(statePath: string): AppConfig {
     supabaseAnonKey: "anon-publica",
     bridgeToken: "casa_wpp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
     financasApiUrl: "https://financas.example/api/v1",
+    demoFormats: [],
     pollIntervalMs: 15_000,
     timeZone: "America/Sao_Paulo",
   };

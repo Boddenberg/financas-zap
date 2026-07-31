@@ -16,6 +16,7 @@ function configWithPhones(...targetPhones: string[]): AppConfig {
     webCachePath: ".wwebjs_cache",
     statePath: ".state.json",
     targetPhones,
+    demoFormats: [],
     pollIntervalMs: 15_000,
     timeZone: "America/Sao_Paulo",
   };

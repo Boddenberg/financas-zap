@@ -16,9 +16,19 @@ export type AppConfig = {
   supabaseAnonKey?: string;
   bridgeToken?: string;
   financasApiUrl?: string;
+  /** Quais prévias o modo `--demo` pede. `undefined` = números inventados. */
+  demoFormats: Array<string | undefined>;
   pollIntervalMs: number;
   timeZone: string;
 };
+
+/** Os quatro tipos que a casa manda, na ordem em que se lê a conversa. */
+export const FORMATOS_DE_PREVIA = [
+  "bloco",
+  "resumo_diario",
+  "panorama_semanal",
+  "panorama_mensal"
+] as const;
 
 export class ConfigError extends Error {
   constructor(message: string) {
@@ -75,6 +85,35 @@ function normalizeUrl(name: string, rawValue: string): string {
   return parsed.toString().replace(/\/+$/, "");
 }
 
+/**
+ * Quais prévias pedir no modo `--demo`.
+ *
+ * Sem argumento, pede uma de cada tipo — que é o que responde "como vai ficar?".
+ * `--demo=bloco` pede só aquela; `--demo=inventado` usa os números falsos.
+ */
+function readDemoFormats(args: string[]): Array<string | undefined> {
+  const pedido = args
+    .find((argumento) => argumento.startsWith("--demo="))
+    ?.slice("--demo=".length)
+    .trim();
+
+  if (!pedido) {
+    return [...FORMATOS_DE_PREVIA];
+  }
+
+  if (pedido === "inventado" || pedido === "demonstracao") {
+    return [undefined];
+  }
+
+  if (!(FORMATOS_DE_PREVIA as readonly string[]).includes(pedido)) {
+    throw new ConfigError(
+      `--demo aceita ${FORMATOS_DE_PREVIA.join(", ")} ou inventado. Recebido: "${pedido}".`,
+    );
+  }
+
+  return [pedido];
+}
+
 function readMode(args: string[]): RunMode {
   if (args.includes("--test-message")) {
     return "test-message";
@@ -84,7 +123,7 @@ function readMode(args: string[]): RunMode {
     return "list-groups";
   }
 
-  if (args.includes("--demo")) {
+  if (args.some((argumento) => argumento === "--demo" || argumento.startsWith("--demo="))) {
     return "demo";
   }
 
@@ -229,6 +268,7 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     ),
     targetPhones,
     groupId,
+    demoFormats: readDemoFormats(args),
     pollIntervalMs: readPollInterval(),
     timeZone: validateTimeZone(process.env.APP_TIMEZONE?.trim() || "America/Sao_Paulo"),
     ...watchConfig,

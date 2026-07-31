@@ -67,9 +67,18 @@ export class BackendPulseClient {
     };
   }
 
-  /** Pede ao backend um envio de demonstração, com dados assumidamente falsos. */
-  async requestDemo(): Promise<boolean> {
-    const body = await this.post("/casa/whatsapp/demonstracao", DEMO_TIMEOUT_MS);
+  /**
+   * Pede ao backend uma prévia de como um tipo de mensagem vai chegar.
+   *
+   * Sem formato, vêm números inventados. Com um dos tipos reais, o backend usa
+   * o histórico da casa — e ainda assim enfileira como demonstração, para a
+   * prévia não gastar o resumo do período.
+   */
+  async requestDemo(formato?: string): Promise<boolean> {
+    const caminho = formato
+      ? `/casa/whatsapp/demonstracao?formato=${encodeURIComponent(formato)}`
+      : "/casa/whatsapp/demonstracao";
+    const body = await this.post(caminho, DEMO_TIMEOUT_MS);
     return (body as { enfileirada?: unknown }).enfileirada === true;
   }
 

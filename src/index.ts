@@ -152,14 +152,17 @@ async function main(): Promise<void> {
     );
 
     if (config.mode === "demo") {
-      console.log("Pedindo ao Finanças uma mensagem de demonstração...");
-      const enfileirada = await pulse.requestDemo();
+      for (const formato of config.demoFormats) {
+        const rotulo = formato ?? "números inventados";
+        console.log(`Pedindo ao Finanças a prévia de ${rotulo}...`);
 
-      if (!enfileirada) {
-        throw new Error("O Finanças não enfileirou a demonstração.");
+        if (await pulse.requestDemo(formato)) {
+          console.log(`Prévia de ${rotulo} enfileirada.`);
+        } else {
+          console.log(`O Finanças não enfileirou a prévia de ${rotulo}.`);
+        }
       }
 
-      console.log("Demonstração enfileirada. Entregando...");
       const monitorDemo = new MessageMonitor(
         client,
         outbox,
