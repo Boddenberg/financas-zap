@@ -1,9 +1,9 @@
 import qrcode from "qrcode-terminal";
 import type { Client } from "whatsapp-web.js";
-import { CleaningMonitor } from "./cleaning-monitor";
 import { ConfigError, loadConfig } from "./config";
-import { FinancasClient } from "./financas-client";
+import { MessageMonitor } from "./message-monitor";
 import { StateStore } from "./state-store";
+import { SupabaseOutboxClient } from "./supabase-outbox-client";
 import {
   createWhatsAppClient,
   listGroups,
@@ -139,18 +139,18 @@ async function main(): Promise<void> {
       return;
     }
 
-    const finances = new FinancasClient(config);
-    console.log("Validando a chave restrita do app Casa...");
-    await finances.connect();
+    const outbox = new SupabaseOutboxClient(config);
+    console.log("Validando o acesso restrito à caixa do WhatsApp no Supabase...");
+    await outbox.connect();
     const destinations = await resolveDestinations(client, config);
     console.log(
       `Destino dos avisos: ${destinations
         .map((destination) => destination.description)
         .join(" e ")}.`,
     );
-    const monitor = new CleaningMonitor(
+    const monitor = new MessageMonitor(
       client,
-      finances,
+      outbox,
       destinations,
       stateStore,
       config,

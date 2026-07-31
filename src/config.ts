@@ -12,8 +12,9 @@ export type AppConfig = {
   statePath: string;
   targetPhones: string[];
   groupId?: string;
-  financesApiUrl?: string;
-  financesBridgeToken?: string;
+  supabaseUrl?: string;
+  supabaseAnonKey?: string;
+  bridgeToken?: string;
   pollIntervalMs: number;
   timeZone: string;
 };
@@ -194,8 +195,9 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
   const watchConfig =
     mode === "watch"
       ? {
-          financesApiUrl: normalizeUrl("FINANCAS_API_URL", required("FINANCAS_API_URL")),
-          financesBridgeToken: readBridgeToken(),
+          supabaseUrl: normalizeUrl("SUPABASE_URL", required("SUPABASE_URL")),
+          supabaseAnonKey: required("SUPABASE_ANON_KEY"),
+          bridgeToken: readBridgeToken(),
         }
       : {};
 

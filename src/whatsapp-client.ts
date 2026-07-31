@@ -62,7 +62,10 @@ export async function sendAndWaitForServerAcknowledgement(
   let handleTargetAcknowledgement: ((ack: MessageAck) => void) | undefined;
 
   const acknowledgementListener = (message: Message, ack: MessageAck): void => {
-    const messageId = message.id._serialized;
+    const messageId = message.id?._serialized;
+    if (!messageId) {
+      return;
+    }
     observedAcknowledgements.set(messageId, ack);
 
     if (messageId === targetMessageId) {
@@ -77,9 +80,12 @@ export async function sendAndWaitForServerAcknowledgement(
       waitUntilMsgSent: true,
     });
 
-    targetMessageId = sentMessage.id._serialized;
+    targetMessageId = sentMessage?.id?._serialized;
+    if (!targetMessageId) {
+      return "envio aceito pelo WhatsApp";
+    }
     const currentAcknowledgement =
-      observedAcknowledgements.get(targetMessageId) ?? sentMessage.ack;
+      observedAcknowledgements.get(targetMessageId) ?? sentMessage?.ack;
 
     if (currentAcknowledgement === MessageAck.ACK_ERROR) {
       throw new Error("O WhatsApp recusou a mensagem durante o envio.");
@@ -153,11 +159,22 @@ export async function resolveDestinations(
   const connectedPhone = client.info.wid.user.replace(/\D/g, "");
 
   for (const phone of config.targetPhones) {
-    const registeredNumber = sameBrazilianNumber(phone, connectedPhone)
-      ? client.info.wid
-      : await client.getNumberId(phone);
+    let registeredId = sameBrazilianNumber(phone, connectedPhone)
+      ? client.info.wid._serialized
+      : undefined;
 
-    if (!registeredNumber) {
+    if (!registeredId) {
+      try {
+        registeredId = (await client.getNumberId(phone))?._serialized;
+      } catch {
+        // Algumas versões do WhatsApp Web quebram a consulta de existência
+        // antes de devolver um resultado. O envio direto ainda é suportado e
+        // confirma no servidor se o destino realmente existe.
+        registeredId = `${phone}@c.us`;
+      }
+    }
+
+    if (!registeredId) {
       throw new Error(
         `O número terminado em ${phone.slice(-4)} não está registrado no WhatsApp ou não pôde ser localizado.`,
       );
@@ -165,7 +182,7 @@ export async function resolveDestinations(
 
     destinations.push({
       key: `phone:${phone}`,
-      id: registeredNumber._serialized,
+      id: registeredId,
       description: `o número terminado em ${phone.slice(-4)}`,
     });
   }

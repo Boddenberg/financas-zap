@@ -1,5 +1,8 @@
 import type { AppConfig } from "./config";
-import type { CleaningEvent, FinancasClient } from "./financas-client";
+import type {
+  OutboxMessage,
+  SupabaseOutboxClient,
+} from "./supabase-outbox-client";
 import {
   advanceCursor,
   isAfterCursor,
@@ -12,21 +15,8 @@ import {
 } from "./whatsapp-client";
 import type { Client } from "whatsapp-web.js";
 
-function formatPoints(points: number): string {
-  return new Intl.NumberFormat("pt-BR", {
-    maximumFractionDigits: 2,
-  }).format(points);
-}
-
-export function formatCleaningMessage(event: CleaningEvent): string {
-  const location = event.roomName ? ` em *${event.roomName}*` : "";
-  const shared = event.shared ? "\n🤝 Atividade feita em conjunto." : "";
-
-  return [
-    "🧹 *Casa cuidada!*",
-    `${event.actorName} registrou *${event.activityName}*${location}.`,
-    `⭐ +${formatPoints(event.points)} pontos no app Casa.${shared}`,
-  ].join("\n");
+export function contentForDelivery(message: OutboxMessage): string {
+  return message.content;
 }
 
 function wait(ms: number, signal: AbortSignal): Promise<void> {
@@ -47,10 +37,10 @@ function wait(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export class CleaningMonitor {
+export class MessageMonitor {
   constructor(
     private readonly whatsapp: Client,
-    private readonly finances: FinancasClient,
+    private readonly outbox: SupabaseOutboxClient,
     private readonly destinations: WhatsAppDestination[],
     private readonly store: StateStore,
     private readonly config: AppConfig,
@@ -59,7 +49,7 @@ export class CleaningMonitor {
   async run(signal: AbortSignal): Promise<void> {
     const state = await this.store.loadOrCreate();
     console.log(
-      `Monitorando novas limpezas a partir de ${new Date(state.cursorAt).toLocaleString(
+      `Monitorando a caixa do WhatsApp a partir de ${new Date(state.cursorAt).toLocaleString(
         "pt-BR",
         { timeZone: this.config.timeZone },
       )}.`,
@@ -71,12 +61,12 @@ export class CleaningMonitor {
 
         if (sent > 0) {
           console.log(
-            `${sent} ${sent === 1 ? "limpeza avisada" : "limpezas avisadas"} pelo WhatsApp.`,
+            `${sent} ${sent === 1 ? "mensagem entregue" : "mensagens entregues"} pelo WhatsApp.`,
           );
         }
       } catch (error) {
         console.error(
-          `Falha ao consultar ou avisar uma limpeza: ${
+          `Falha ao consultar ou entregar a caixa do WhatsApp: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
@@ -87,25 +77,25 @@ export class CleaningMonitor {
   }
 
   private async processAvailable(state: BridgeState): Promise<number> {
-    const events = await this.finances.listEventsSince(
+    const messages = await this.outbox.listMessagesSince(
       state.cursorAt,
       state.cursorIds,
     );
-    events.sort(
+    messages.sort(
       (first, second) =>
-        Date.parse(first.savedAt) - Date.parse(second.savedAt) ||
+        Date.parse(first.createdAt) - Date.parse(second.createdAt) ||
         first.id.localeCompare(second.id),
     );
     let sent = 0;
 
-    for (const event of events) {
-      if (!isAfterCursor(state, event)) {
+    for (const message of messages) {
+      if (!isAfterCursor(state, message)) {
         continue;
       }
 
-      await this.deliverEvent(state, event);
-      advanceCursor(state, event);
-      delete state.deliveredDestinations[event.id];
+      await this.deliverMessage(state, message);
+      advanceCursor(state, message);
+      delete state.deliveredDestinations[message.id];
       await this.store.save(state);
       sent += 1;
     }
@@ -113,9 +103,11 @@ export class CleaningMonitor {
     return sent;
   }
 
-  private async deliverEvent(state: BridgeState, event: CleaningEvent): Promise<void> {
-    const delivered = new Set(state.deliveredDestinations[event.id] ?? []);
-    const content = formatCleaningMessage(event);
+  private async deliverMessage(
+    state: BridgeState,
+    message: OutboxMessage,
+  ): Promise<void> {
+    const delivered = new Set(state.deliveredDestinations[message.id] ?? []);
 
     for (const destination of this.destinations) {
       if (delivered.has(destination.key)) {
@@ -125,13 +117,13 @@ export class CleaningMonitor {
       const acknowledgement = await sendAndWaitForServerAcknowledgement(
         this.whatsapp,
         destination.id,
-        content,
+        contentForDelivery(message),
       );
       console.log(
-        `Aviso de "${event.activityName}" enviado para ${destination.description} (${acknowledgement}).`,
+        `Mensagem ${message.id} enviada para ${destination.description} (${acknowledgement}).`,
       );
       delivered.add(destination.key);
-      state.deliveredDestinations[event.id] = [...delivered];
+      state.deliveredDestinations[message.id] = [...delivered];
       await this.store.save(state);
     }
   }

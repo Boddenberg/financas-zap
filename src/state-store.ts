@@ -82,25 +82,25 @@ export class StateStore {
 
 export function isAfterCursor(
   state: BridgeState,
-  event: { id: string; savedAt: string },
+  message: { id: string; createdAt: string },
 ): boolean {
-  const comparison = Date.parse(event.savedAt) - Date.parse(state.cursorAt);
-  return comparison > 0 || (comparison === 0 && !state.cursorIds.includes(event.id));
+  const comparison = Date.parse(message.createdAt) - Date.parse(state.cursorAt);
+  return comparison > 0 || (comparison === 0 && !state.cursorIds.includes(message.id));
 }
 
 export function advanceCursor(
   state: BridgeState,
-  event: { id: string; savedAt: string },
+  message: { id: string; createdAt: string },
 ): void {
-  const comparison = Date.parse(event.savedAt) - Date.parse(state.cursorAt);
+  const comparison = Date.parse(message.createdAt) - Date.parse(state.cursorAt);
 
   if (comparison > 0) {
-    state.cursorAt = event.savedAt;
-    state.cursorIds = [event.id];
+    state.cursorAt = message.createdAt;
+    state.cursorIds = [message.id];
     return;
   }
 
-  if (comparison === 0 && !state.cursorIds.includes(event.id)) {
-    state.cursorIds.push(event.id);
+  if (comparison === 0 && !state.cursorIds.includes(message.id)) {
+    state.cursorIds.push(message.id);
   }
 }

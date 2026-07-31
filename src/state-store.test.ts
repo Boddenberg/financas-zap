@@ -32,21 +32,21 @@ test("o cursor distingue registros salvos no mesmo instante", () => {
   assert.equal(
     isAfterCursor(state, {
       id: "registro-1",
-      savedAt: "2026-07-29T21:00:00.000Z",
+      createdAt: "2026-07-29T21:00:00.000Z",
     }),
     false,
   );
   assert.equal(
     isAfterCursor(state, {
       id: "registro-2",
-      savedAt: "2026-07-29T21:00:00.000Z",
+      createdAt: "2026-07-29T21:00:00.000Z",
     }),
     true,
   );
 
   advanceCursor(state, {
     id: "registro-2",
-    savedAt: "2026-07-29T21:00:00.000Z",
+    createdAt: "2026-07-29T21:00:00.000Z",
   });
   assert.deepEqual(state.cursorIds, ["registro-1", "registro-2"]);
 });

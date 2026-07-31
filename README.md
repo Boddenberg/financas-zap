@@ -1,13 +1,13 @@
 # Finanças Zap
 
-Ponte local entre o app Casa e o WhatsApp. Enquanto este processo estiver
-ligado, ele:
+Entregador local entre uma caixa de saída dedicada no Supabase e o WhatsApp.
+Enquanto este processo estiver ligado, ele:
 
-1. usa uma chave restrita gerada pelo próprio app Casa;
-2. lê somente os novos registros da categoria de limpeza daquela residência;
-3. não recebe fotos, observações nem outros dados do app;
-4. envia um aviso para os números configurados ou para um grupo;
-5. guarda a posição localmente para recuperar eventos após um reinício sem
+1. chama somente a função `ler_mensagens_whatsapp_casa` no Supabase;
+2. recebe apenas `id`, `mensagem` pronta e `criada_em`;
+3. repassa `mensagem` sem formatar, filtrar ou consultar dados da Casa;
+4. entrega o texto para os números configurados ou para um grupo;
+5. guarda a posição localmente para recuperar mensagens após um reinício sem
    repetir o que já foi confirmado pelo servidor do WhatsApp.
 
 > `whatsapp-web.js` é uma integração não oficial. Use apenas para automação
@@ -18,7 +18,7 @@ ligado, ele:
 
 - Windows 10 ou 11;
 - Node.js 20 ou mais recente;
-- uma conta já ativa no Finanças e no app Casa;
+- uma chave restrita da ponte, gerada no app Casa;
 - um celular com WhatsApp para conectar a sessão local.
 
 ## Instalação
@@ -31,10 +31,12 @@ Copy-Item .env.example .env
 ## Configuração
 
 No app, abra **Casa > Ajustes > WhatsApp**, gere a chave e clique em
-**Copiar configuração**. Cole as duas linhas no `.env`:
+**Copiar configuração**. Use no `.env` a URL e a chave pública `anon` do mesmo
+Supabase do Finanças, além da chave restrita da ponte:
 
 ```env
-FINANCAS_API_URL="https://SEU-BACKEND/api/v1"
+SUPABASE_URL="https://SEU-PROJETO.supabase.co"
+SUPABASE_ANON_KEY="..."
 FINANCAS_BRIDGE_TOKEN="casa_wpp_..."
 
 WHATSAPP_RECIPIENTS="5511999999999,5511888888888"
@@ -44,10 +46,11 @@ POLL_INTERVAL_SECONDS="15"
 HEADLESS="true"
 ```
 
-A chave da ponte não é um login e não é uma credencial administrativa do
-Supabase. O banco guarda somente o hash dela. Qualquer morador pode revogar ou
-rotacionar a chave em **Casa > Ajustes > WhatsApp**; a chave anterior para de
-funcionar imediatamente.
+Não configure e-mail, senha nem `SUPABASE_SERVICE_ROLE_KEY`. A chave `anon` é a
+chave pública do projeto; a função do banco exige também a chave restrita da
+ponte e retorna somente a caixa daquela residência. O banco guarda apenas o
+hash dessa chave. Qualquer morador pode revogá-la ou rotacioná-la em
+**Casa > Ajustes > WhatsApp**.
 
 Em `WHATSAPP_RECIPIENTS`, separe os números por vírgula. O código também aceita
 DDD + número e acrescenta o país configurado em `DEFAULT_COUNTRY_CODE` (55 por
@@ -64,12 +67,12 @@ Na primeira vez:
 1. o terminal desenha um QR Code;
 2. no celular, abra **WhatsApp > Aparelhos conectados > Conectar um aparelho**;
 3. escaneie o QR Code;
-4. aguarde as mensagens de que o WhatsApp e o Finanças estão prontos.
+4. aguarde as mensagens de que o WhatsApp e a caixa do Supabase estão prontos.
 
 Na estreia, o cursor nasce no horário da inicialização. O histórico antigo não
 é enviado. A partir daí, `.runtime/casa-notifications.json` registra a posição
 e as entregas parciais. Se a ponte ficar desligada, ela recupera as novas
-limpezas assim que voltar.
+mensagens assim que voltar.
 
 Mantenha o processo aberto para receber os avisos. Em operação compilada:
 
@@ -116,8 +119,8 @@ npm run build
 
 ## Solução de problemas
 
-- **Chave recusada:** gere uma nova em **Casa > Ajustes > WhatsApp**, copie as
-  duas linhas novamente e reinicie a ponte.
+- **Chave recusada:** gere uma nova em **Casa > Ajustes > WhatsApp**, copie a
+  chave para `FINANCAS_BRIDGE_TOKEN` e reinicie a ponte.
 - **Número não registrado:** use país + DDD + número e confirme que o contato
   possui WhatsApp.
 - **Grupo não encontrado:** rode `npm run list:groups` novamente com a mesma

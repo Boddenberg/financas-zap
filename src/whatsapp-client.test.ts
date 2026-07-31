@@ -1,0 +1,67 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import type { Client } from "whatsapp-web.js";
+import type { AppConfig } from "./config";
+import {
+  resolveDestinations,
+  sendAndWaitForServerAcknowledgement,
+} from "./whatsapp-client";
+
+function configWithPhones(...targetPhones: string[]): AppConfig {
+  return {
+    mode: "test-message",
+    testMessage: "Teste",
+    headless: true,
+    authDataPath: ".wwebjs_auth",
+    webCachePath: ".wwebjs_cache",
+    statePath: ".state.json",
+    targetPhones,
+    pollIntervalMs: 15_000,
+    timeZone: "America/Sao_Paulo",
+  };
+}
+
+test("usa o ID direto quando a consulta de número do WhatsApp falha", async () => {
+  const client = {
+    info: {
+      wid: {
+        server: "c.us",
+        user: "5511981090986",
+        _serialized: "5511981090986@c.us",
+      },
+    },
+    getNumberId: async () => {
+      throw new TypeError("WhatsApp Web não retornou o registro consultado");
+    },
+  } as unknown as Client;
+
+  const destinations = await resolveDestinations(
+    client,
+    configWithPhones("5511981090986", "5511972435718"),
+  );
+
+  assert.deepEqual(
+    destinations.map((destination) => destination.id),
+    ["5511981090986@c.us", "5511972435718@c.us"],
+  );
+});
+
+test("aceita o envio quando a versão atual do WhatsApp não devolve a mensagem", async () => {
+  let removedListener = false;
+  const client = {
+    on: () => undefined,
+    off: () => {
+      removedListener = true;
+    },
+    sendMessage: async () => undefined,
+  } as unknown as Client;
+
+  const acknowledgement = await sendAndWaitForServerAcknowledgement(
+    client,
+    "5511981090986@c.us",
+    "Teste",
+  );
+
+  assert.equal(acknowledgement, "envio aceito pelo WhatsApp");
+  assert.equal(removedListener, true);
+});
