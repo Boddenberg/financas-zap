@@ -1,13 +1,19 @@
 import { Client, LocalAuth, MessageAck } from "whatsapp-web.js";
-import type { Chat, Message } from "whatsapp-web.js";
+import type { Message } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 
 const SERVER_ACK_TIMEOUT_MS = 30_000;
+const GROUP_ID_SUFFIX = "@g.us";
 
 export type WhatsAppDestination = {
   key: string;
   id: string;
   description: string;
+};
+
+export type WhatsAppGroup = {
+  id: string;
+  name: string;
 };
 
 function sameBrazilianNumber(first: string, second: string): boolean {
@@ -123,6 +129,64 @@ export async function sendAndWaitForServerAcknowledgement(
   }
 }
 
+/**
+ * Lê os grupos direto da coleção de conversas já carregada na página.
+ *
+ * `client.getChats()` monta o modelo completo de cada conversa e, para grupo,
+ * pede a metadados ao servidor. Um único grupo que falhe nessa consulta derruba
+ * a lista inteira com um erro minificado da própria página. Aqui só sai o que
+ * já está em memória: identificador e título.
+ */
+export async function readGroups(client: Client): Promise<WhatsAppGroup[]> {
+  const page = client.pupPage;
+
+  if (!page) {
+    throw new Error(
+      "O cliente do WhatsApp não expôs a página do Chromium para listar as conversas.",
+    );
+  }
+
+  const rawChats: unknown = await page.evaluate(() => {
+    const collections = (
+      window as unknown as {
+        require: (moduleName: string) => {
+          Chat: { getModelsArray: () => unknown[] };
+        };
+      }
+    ).require("WAWebCollections");
+
+    return collections.Chat.getModelsArray().map((chat) => {
+      const model = chat as {
+        id?: { _serialized?: unknown };
+        name?: unknown;
+        formattedTitle?: unknown;
+      };
+
+      return {
+        id: model.id?._serialized,
+        name: model.formattedTitle ?? model.name,
+      };
+    });
+  });
+
+  if (!Array.isArray(rawChats)) {
+    throw new Error("A página do WhatsApp não devolveu a lista de conversas.");
+  }
+
+  return rawChats.flatMap((entry): WhatsAppGroup[] => {
+    const chat = entry as { id?: unknown; name?: unknown };
+    const id = typeof chat.id === "string" ? chat.id : "";
+
+    if (!id.endsWith(GROUP_ID_SUFFIX)) {
+      return [];
+    }
+
+    const name = typeof chat.name === "string" ? chat.name.trim() : "";
+
+    return [{ id, name: name || "grupo sem nome" }];
+  });
+}
+
 export async function resolveDestinations(
   client: Client,
   config: AppConfig,
@@ -132,25 +196,22 @@ export async function resolveDestinations(
   }
 
   if (config.groupId) {
-    let chat: Chat;
+    const groupId = config.groupId;
+    const group = (await readGroups(client)).find(
+      (candidate) => candidate.id === groupId,
+    );
 
-    try {
-      chat = await client.getChatById(config.groupId);
-    } catch {
+    if (!group) {
       throw new Error(
         "O grupo configurado não foi encontrado na conta conectada. Rode npm run list:groups para conferir o ID.",
       );
     }
 
-    if (!chat.isGroup) {
-      throw new Error("WHATSAPP_GROUP_ID não aponta para um grupo do WhatsApp.");
-    }
-
     return [
       {
-        key: `group:${config.groupId}`,
-        id: config.groupId,
-        description: `o grupo "${chat.name}"`,
+        key: `group:${groupId}`,
+        id: groupId,
+        description: `o grupo "${group.name}"`,
       },
     ];
   }
@@ -209,9 +270,9 @@ export async function sendTestMessage(
 }
 
 export async function listGroups(client: Client): Promise<void> {
-  const groups = (await client.getChats())
-    .filter((chat) => chat.isGroup)
-    .sort((first, second) => first.name.localeCompare(second.name, "pt-BR"));
+  const groups = (await readGroups(client)).sort((first, second) =>
+    first.name.localeCompare(second.name, "pt-BR"),
+  );
 
   if (groups.length === 0) {
     console.log("A conta conectada não participa de nenhum grupo.");
@@ -221,6 +282,6 @@ export async function listGroups(client: Client): Promise<void> {
   console.log("Grupos disponíveis:");
 
   for (const group of groups) {
-    console.log(`- ${group.name}: ${group.id._serialized}`);
+    console.log(`- ${group.name}: ${group.id}`);
   }
 }

@@ -46,6 +46,54 @@ test("usa o ID direto quando a consulta de número do WhatsApp falha", async () 
   );
 });
 
+test("resolve o grupo pela coleção da página, sem pedir a metadados", async () => {
+  const client = {
+    info: { wid: { server: "c.us", user: "5511981090986" } },
+    getChats: async () => {
+      throw new Error("r");
+    },
+    getChatById: async () => {
+      throw new Error("r");
+    },
+    pupPage: {
+      evaluate: async () => [
+        { id: "5511972435718@c.us", name: "Contato privado" },
+        { id: "120363000000000000@g.us", name: "Casa" },
+      ],
+    },
+  } as unknown as Client;
+
+  const destinations = await resolveDestinations(client, {
+    ...configWithPhones(),
+    groupId: "120363000000000000@g.us",
+  });
+
+  assert.deepEqual(destinations, [
+    {
+      key: "group:120363000000000000@g.us",
+      id: "120363000000000000@g.us",
+      description: 'o grupo "Casa"',
+    },
+  ]);
+});
+
+test("avisa para reconferir o ID quando o grupo não está na conta conectada", async () => {
+  const client = {
+    info: { wid: { server: "c.us", user: "5511981090986" } },
+    pupPage: {
+      evaluate: async () => [{ id: "120363000000000000@g.us", name: "Casa" }],
+    },
+  } as unknown as Client;
+
+  await assert.rejects(
+    resolveDestinations(client, {
+      ...configWithPhones(),
+      groupId: "120363999999999999@g.us",
+    }),
+    /npm run list:groups/,
+  );
+});
+
 test("aceita o envio quando a versão atual do WhatsApp não devolve a mensagem", async () => {
   let removedListener = false;
   const client = {
