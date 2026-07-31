@@ -1,7 +1,7 @@
 import path from "node:path";
 import dotenv from "dotenv";
 
-export type RunMode = "watch" | "test-message" | "list-groups";
+export type RunMode = "watch" | "test-message" | "list-groups" | "demo";
 
 export type AppConfig = {
   mode: RunMode;
@@ -15,6 +15,7 @@ export type AppConfig = {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   bridgeToken?: string;
+  financasApiUrl?: string;
   pollIntervalMs: number;
   timeZone: string;
 };
@@ -81,6 +82,10 @@ function readMode(args: string[]): RunMode {
 
   if (args.includes("--list-groups")) {
     return "list-groups";
+  }
+
+  if (args.includes("--demo")) {
+    return "demo";
   }
 
   return "watch";
@@ -192,12 +197,21 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     );
   }
 
+  // O modo de demonstração pede ao backend uma mensagem de teste e a entrega
+  // pelo caminho normal: ele precisa das mesmas credenciais do modo contínuo.
   const watchConfig =
-    mode === "watch"
+    mode === "watch" || mode === "demo"
       ? {
           supabaseUrl: normalizeUrl("SUPABASE_URL", required("SUPABASE_URL")),
           supabaseAnonKey: required("SUPABASE_ANON_KEY"),
           bridgeToken: readBridgeToken(),
+          // Sem o pulso não existe resumo diário, panorama nem fechamento de
+          // bloco: quem decide que chegou a hora é o backend, e ele só fica
+          // sabendo que "agora" chegou porque esta ponte o avisa.
+          financasApiUrl: normalizeUrl(
+            "FINANCAS_API_URL",
+            required("FINANCAS_API_URL"),
+          ),
         }
       : {};
 

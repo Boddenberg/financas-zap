@@ -3,12 +3,21 @@
 Entregador local entre uma caixa de saída dedicada no Supabase e o WhatsApp.
 Enquanto este processo estiver ligado, ele:
 
-1. chama somente a função `ler_mensagens_whatsapp_casa` no Supabase;
-2. recebe apenas `id`, `mensagem` pronta e `criada_em`;
-3. repassa `mensagem` sem formatar, filtrar ou consultar dados da Casa;
-4. entrega o texto para os números configurados ou para um grupo;
-5. guarda a posição localmente para recuperar mensagens após um reinício sem
+1. avisa o Finanças que o tempo passou (`POST /casa/whatsapp/pulso`), sem dizer
+   nem perguntar mais nada;
+2. chama somente a função `ler_mensagens_whatsapp_casa` no Supabase;
+3. recebe apenas `id`, `mensagem` pronta, a arte em base64 e `criada_em`;
+4. repassa `mensagem` sem formatar, filtrar ou consultar dados da Casa, com a
+   imagem como legenda quando ela vem;
+5. entrega para os números configurados ou para um grupo;
+6. devolve ao Finanças se a entrega deu certo (`confirmar_mensagem_whatsapp_casa`);
+7. guarda a posição localmente para recuperar mensagens após um reinício sem
    repetir o que já foi confirmado pelo servidor do WhatsApp.
+
+**O pulso é o relógio da Casa.** O Finanças não tem agendador: é essa batida que
+faz o resumo diário, o panorama semanal, o mensal e o fechamento de um bloco de
+registros acontecerem na hora marcada. A ponte continua sem interpretar nada —
+ela diz "agora", e quem decide o que venceu é o backend.
 
 > `whatsapp-web.js` é uma integração não oficial. Use apenas para automação
 > pessoal e de baixo volume. Mudanças no WhatsApp Web podem interromper o
@@ -38,6 +47,7 @@ Supabase do Finanças, além da chave restrita da ponte:
 SUPABASE_URL="https://SEU-PROJETO.supabase.co"
 SUPABASE_ANON_KEY="..."
 FINANCAS_BRIDGE_TOKEN="casa_wpp_..."
+FINANCAS_API_URL="https://seu-backend.up.railway.app/api/v1"
 
 WHATSAPP_RECIPIENTS="5511999999999,5511888888888"
 WHATSAPP_GROUP_ID=""
@@ -109,6 +119,18 @@ npm run test:message
 O teste usa o mesmo grupo ou os mesmos números do monitor e encerra depois da
 confirmação do servidor do WhatsApp.
 
+## Testar a mensagem inteira
+
+Para ver o caminho completo — texto escrito pela IA e imagem do Analytics —
+com números inventados e assumidos como tal na primeira linha:
+
+```powershell
+npm run demo:casa
+```
+
+A ponte pede a demonstração ao Finanças, entrega o que estiver pendente na
+caixa e encerra.
+
 ## Validação
 
 ```powershell
@@ -121,6 +143,13 @@ npm run build
 
 - **Chave recusada:** gere uma nova em **Casa > Ajustes > WhatsApp**, copie a
   chave para `FINANCAS_BRIDGE_TOKEN` e reinicie a ponte.
+- **"Falha ao avisar o Finanças do horário":** confira `FINANCAS_API_URL` (com
+  o `/api/v1`) e se o backend está no ar. A entrega do que já está na caixa
+  continua funcionando; o que para de acontecer é o fechamento de novos
+  períodos.
+- **Nenhum resumo chega, mas a ponte está ligada:** confira em
+  **Casa > Ajustes > WhatsApp** se o tipo de mensagem está ativo e se o horário
+  já passou no fuso configurado.
 - **Número não registrado:** use país + DDD + número e confirme que o contato
   possui WhatsApp.
 - **Grupo não encontrado:** rode `npm run list:groups` novamente com a mesma

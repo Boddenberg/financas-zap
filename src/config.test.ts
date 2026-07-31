@@ -22,34 +22,38 @@ test("recusa números incompletos", () => {
   );
 });
 
-test("modo contínuo usa Supabase e chave restrita sem login pessoal", () => {
-  const variables = [
-    "SUPABASE_URL",
-    "SUPABASE_ANON_KEY",
-    "FINANCAS_BRIDGE_TOKEN",
-    "WHATSAPP_RECIPIENTS",
-    "WHATSAPP_GROUP_ID",
-  ] as const;
+const VARIAVEIS = [
+  "SUPABASE_URL",
+  "SUPABASE_ANON_KEY",
+  "FINANCAS_BRIDGE_TOKEN",
+  "FINANCAS_API_URL",
+  "WHATSAPP_RECIPIENTS",
+  "WHATSAPP_GROUP_ID",
+] as const;
+
+function comAmbiente(
+  ajustes: Partial<Record<(typeof VARIAVEIS)[number], string>>,
+  corpo: () => void,
+): void {
   const previous = Object.fromEntries(
-    variables.map((name) => [name, process.env[name]]),
+    VARIAVEIS.map((name) => [name, process.env[name]]),
   );
   process.env.SUPABASE_URL = "https://project.supabase.co";
   process.env.SUPABASE_ANON_KEY = "anon-publica";
   process.env.FINANCAS_BRIDGE_TOKEN =
     "casa_wpp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
+  process.env.FINANCAS_API_URL = "https://financas.example/api/v1";
   process.env.WHATSAPP_RECIPIENTS = "11981090986";
   process.env.WHATSAPP_GROUP_ID = "";
 
-  try {
-    const config = loadConfig([]);
+  for (const [name, value] of Object.entries(ajustes)) {
+    process.env[name] = value;
+  }
 
-    assert.equal(config.supabaseUrl, "https://project.supabase.co");
-    assert.equal(config.supabaseAnonKey, "anon-publica");
-    assert.match(config.bridgeToken ?? "", /^casa_wpp_/);
-    assert.equal("supabaseEmail" in config, false);
-    assert.equal("supabasePassword" in config, false);
+  try {
+    corpo();
   } finally {
-    for (const name of variables) {
+    for (const name of VARIAVEIS) {
       const value = previous[name];
       if (value === undefined) {
         delete process.env[name];
@@ -58,4 +62,26 @@ test("modo contínuo usa Supabase e chave restrita sem login pessoal", () => {
       }
     }
   }
+}
+
+test("modo contínuo usa Supabase e chave restrita sem login pessoal", () => {
+  comAmbiente({}, () => {
+    const config = loadConfig([]);
+
+    assert.equal(config.supabaseUrl, "https://project.supabase.co");
+    assert.equal(config.supabaseAnonKey, "anon-publica");
+    assert.match(config.bridgeToken ?? "", /^casa_wpp_/);
+    assert.equal(config.financasApiUrl, "https://financas.example/api/v1");
+    assert.equal("supabaseEmail" in config, false);
+    assert.equal("supabasePassword" in config, false);
+  });
+});
+
+test("sem o endereço do backend a ponte não sobe: ninguém bateria o relógio", () => {
+  comAmbiente({ FINANCAS_API_URL: "" }, () => {
+    assert.throws(
+      () => loadConfig([]),
+      (error) => error instanceof ConfigError,
+    );
+  });
 });

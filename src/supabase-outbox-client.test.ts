@@ -15,6 +15,7 @@ function config(): AppConfig {
     supabaseUrl: "https://project.supabase.co",
     supabaseAnonKey: "anon-publica",
     bridgeToken: "casa_wpp_abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
+    financasApiUrl: "https://financas.example/api/v1",
     pollIntervalMs: 15_000,
     timeZone: "America/Sao_Paulo",
   };
@@ -36,6 +37,8 @@ test("lê somente a função da outbox e recebe a mensagem pronta", async () => 
         {
           id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           mensagem: "Texto final do Finanças",
+          imagem_base64: "iVBORw0KGgo=",
+          imagem_nome: "casa-resumo_diario-2026-07-29.png",
           criada_em: "2026-07-29T22:00:00Z",
         },
       ]),
@@ -68,8 +71,41 @@ test("lê somente a função da outbox e recebe a mensagem pronta", async () => 
         id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         content: "Texto final do Finanças",
         createdAt: "2026-07-29T22:00:00Z",
+        imageBase64: "iVBORw0KGgo=",
+        imageName: "casa-resumo_diario-2026-07-29.png",
       },
     ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("confirma a entrega pela mesma chave restrita, sem tocar em tabela", async () => {
+  const originalFetch = globalThis.fetch;
+  let requestedUrl = "";
+  let body: Record<string, unknown> = {};
+  globalThis.fetch = async (input, init) => {
+    requestedUrl = String(input);
+    body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response("null", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    await new SupabaseOutboxClient(config()).confirmDelivery(
+      "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      false,
+      "O WhatsApp recusou a mensagem durante o envio.",
+    );
+
+    assert.equal(
+      requestedUrl,
+      "https://project.supabase.co/rest/v1/rpc/confirmar_mensagem_whatsapp_casa",
+    );
+    assert.equal(body.p_entregue, false);
+    assert.equal(body.p_erro, "O WhatsApp recusou a mensagem durante o envio.");
   } finally {
     globalThis.fetch = originalFetch;
   }

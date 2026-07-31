@@ -1,5 +1,6 @@
 import qrcode from "qrcode-terminal";
 import type { Client } from "whatsapp-web.js";
+import { BackendPulseClient } from "./backend-pulse";
 import { ConfigError, loadConfig } from "./config";
 import { MessageMonitor } from "./message-monitor";
 import { StateStore } from "./state-store";
@@ -142,18 +143,41 @@ async function main(): Promise<void> {
     const outbox = new SupabaseOutboxClient(config);
     console.log("Validando o acesso restrito à caixa do WhatsApp no Supabase...");
     await outbox.connect();
+    const pulse = new BackendPulseClient(config);
     const destinations = await resolveDestinations(client, config);
     console.log(
       `Destino dos avisos: ${destinations
         .map((destination) => destination.description)
         .join(" e ")}.`,
     );
+
+    if (config.mode === "demo") {
+      console.log("Pedindo ao Finanças uma mensagem de demonstração...");
+      const enfileirada = await pulse.requestDemo();
+
+      if (!enfileirada) {
+        throw new Error("O Finanças não enfileirou a demonstração.");
+      }
+
+      console.log("Demonstração enfileirada. Entregando...");
+      const monitorDemo = new MessageMonitor(
+        client,
+        outbox,
+        destinations,
+        stateStore,
+        config,
+      );
+      await monitorDemo.entregarPendentes();
+      return;
+    }
+
     const monitor = new MessageMonitor(
       client,
       outbox,
       destinations,
       stateStore,
       config,
+      pulse,
     );
     await monitor.run(abortController.signal);
 

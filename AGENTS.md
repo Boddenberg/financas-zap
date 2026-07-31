@@ -3,18 +3,31 @@
 ## Responsabilidade
 
 Este processo é uma ponte local e restrita. Ele lê somente a caixa de saída
-dedicada no Supabase e entrega o campo `mensagem` no WhatsApp. Não interpreta
-eventos da Casa, não monta texto e não recebe uma credencial administrativa.
+dedicada no Supabase e entrega `mensagem` (com a arte, quando ela vem) no
+WhatsApp. Não interpreta eventos da Casa, não monta texto e não recebe uma
+credencial administrativa.
+
+A ponte também **bate o relógio**: antes de cada leitura ela chama
+`POST /casa/whatsapp/pulso` no Finanças. Isso não é exceção à regra acima — o
+pulso não leva dado nenhum e não recebe conteúdo; ele só informa que o tempo
+passou, porque o backend não tem agendador e sem essa batida nenhum resumo
+periódico nasceria. Quem decide o que venceu continua sendo o backend.
 
 ## Fronteiras
 
 - `supabase-outbox-client.ts` é a única porta para o Supabase.
+- `backend-pulse.ts` é a única porta para a API do Finanças.
 - `whatsapp-client.ts` é a única porta para `whatsapp-web.js`.
-- `message-monitor.ts` coordena leitura, ordenação, entrega e avanço do cursor.
+- `message-monitor.ts` coordena pulso, leitura, ordenação, entrega, confirmação
+  e avanço do cursor.
 - `state-store.ts` garante retomada e idempotência local.
 - `config.ts` valida toda entrada de ambiente antes de iniciar.
-- O contrato da leitura é a função `ler_mensagens_whatsapp_casa`, criada pela
-  migration canônica em `../Financas/supabase/migrations`.
+- O contrato da leitura é a função `ler_mensagens_whatsapp_casa` e o da
+  confirmação é `confirmar_mensagem_whatsapp_casa`, ambas criadas pelas
+  migrations canônicas em `../Financas/supabase/migrations`.
+
+Falhar no pulso nunca pode calar a entrega: mensagem que já está na caixa chega
+mesmo com o backend fora do ar.
 
 Tipos não tornam JSON externo confiável. Respostas do Supabase continuam entrando
 como `unknown` e são validadas antes de virar `OutboxMessage`.

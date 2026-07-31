@@ -1,9 +1,41 @@
-import { Client, LocalAuth, MessageAck } from "whatsapp-web.js";
-import type { Message } from "whatsapp-web.js";
+import { Client, LocalAuth, MessageAck, MessageMedia } from "whatsapp-web.js";
+import type { Message, MessageSendOptions } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 
 const SERVER_ACK_TIMEOUT_MS = 30_000;
 const GROUP_ID_SUFFIX = "@g.us";
+
+/** O que vai para uma conversa: só texto, ou a arte do Analytics com legenda. */
+export type Delivery = {
+  text: string;
+  imageBase64?: string;
+  imageName?: string;
+};
+
+/**
+ * Uma mensagem só, com a imagem e o texto juntos.
+ *
+ * Mandar a arte e depois o texto seriam duas notificações e duas bolhas — e a
+ * segunda chegaria descolada da primeira em qualquer conversa movimentada. A
+ * legenda mantém o par inseparável.
+ */
+function contentFor(delivery: Delivery): {
+  content: string | MessageMedia;
+  options: MessageSendOptions;
+} {
+  if (!delivery.imageBase64) {
+    return { content: delivery.text, options: { waitUntilMsgSent: true } };
+  }
+
+  return {
+    content: new MessageMedia(
+      "image/png",
+      delivery.imageBase64,
+      delivery.imageName ?? "casa.png",
+    ),
+    options: { waitUntilMsgSent: true, caption: delivery.text },
+  };
+}
 
 export type WhatsAppDestination = {
   key: string;
@@ -61,8 +93,11 @@ function acknowledgementDescription(ack: MessageAck): string {
 export async function sendAndWaitForServerAcknowledgement(
   client: Client,
   destinationId: string,
-  content: string,
+  delivery: Delivery | string,
 ): Promise<string> {
+  const { content, options } = contentFor(
+    typeof delivery === "string" ? { text: delivery } : delivery,
+  );
   const observedAcknowledgements = new Map<string, MessageAck>();
   let targetMessageId: string | undefined;
   let handleTargetAcknowledgement: ((ack: MessageAck) => void) | undefined;
@@ -82,9 +117,7 @@ export async function sendAndWaitForServerAcknowledgement(
   client.on("message_ack", acknowledgementListener);
 
   try {
-    const sentMessage = await client.sendMessage(destinationId, content, {
-      waitUntilMsgSent: true,
-    });
+    const sentMessage = await client.sendMessage(destinationId, content, options);
 
     targetMessageId = sentMessage?.id?._serialized;
     if (!targetMessageId) {

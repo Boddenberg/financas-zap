@@ -3,6 +3,8 @@ import type { AppConfig } from "./config";
 type OutboxMessageResponse = {
   id?: unknown;
   mensagem?: unknown;
+  imagem_base64?: unknown;
+  imagem_nome?: unknown;
   criada_em?: unknown;
 };
 
@@ -10,6 +12,9 @@ export type OutboxMessage = {
   id: string;
   content: string;
   createdAt: string;
+  /** PNG do Analytics em base64, quando a mensagem leva imagem. */
+  imageBase64?: string;
+  imageName?: string;
 };
 
 function requireString(value: unknown, field: string): string {
@@ -18,6 +23,10 @@ function requireString(value: unknown, field: string): string {
   }
 
   return value;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== "" ? value : undefined;
 }
 
 async function responseError(response: Response): Promise<string> {
@@ -104,11 +113,48 @@ export class SupabaseOutboxClient {
     );
   }
 
+  /**
+   * Devolve ao Finanças o que aconteceu com a mensagem.
+   *
+   * Sem isso a caixa de saída não sabe distinguir "entregue" de "ainda não
+   * tentei", e uma mensagem que o WhatsApp recusa ficaria sendo reoferecida
+   * para sempre, segurando a fila atrás dela. O backend conta as tentativas e
+   * descarta a que não tem conserto.
+   */
+  async confirmDelivery(
+    messageId: string,
+    delivered: boolean,
+    failure?: string,
+  ): Promise<void> {
+    const url = `${this.supabaseUrl}/rest/v1/rpc/confirmar_mensagem_whatsapp_casa`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        apikey: this.anonKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        p_chave: this.bridgeToken,
+        p_id: messageId,
+        p_entregue: delivered,
+        p_erro: failure ? failure.slice(0, 500) : null,
+      }),
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Não foi possível registrar a entrega no Finanças: ${await responseError(response)}`,
+      );
+    }
+  }
+
   private mapMessage(message: OutboxMessageResponse): OutboxMessage {
     return {
       id: requireString(message.id, "id"),
       content: requireString(message.mensagem, "mensagem"),
       createdAt: requireString(message.criada_em, "criada_em"),
+      imageBase64: optionalString(message.imagem_base64),
+      imageName: optionalString(message.imagem_nome),
     };
   }
 }
