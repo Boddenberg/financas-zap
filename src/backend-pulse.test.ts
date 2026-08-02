@@ -11,6 +11,7 @@ function config(): AppConfig {
     authDataPath: ".auth",
     webCachePath: ".cache",
     statePath: ".state",
+    lockPath: ".lock",
     targetPhones: ["5511981090986"],
     supabaseUrl: "https://project.supabase.co",
     supabaseAnonKey: "anon-publica",

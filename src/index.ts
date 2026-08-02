@@ -4,6 +4,7 @@ import { BackendPulseClient } from "./backend-pulse";
 import { ConfigError, loadConfig } from "./config";
 import { mirrorConsoleToFile } from "./log-file";
 import { MessageMonitor } from "./message-monitor";
+import { claimSingleInstance } from "./single-instance";
 import { StateStore } from "./state-store";
 import { SupabaseOutboxClient } from "./supabase-outbox-client";
 import {
@@ -89,6 +90,19 @@ async function main(): Promise<void> {
     } else {
       console.error(`Falha ao carregar a configuração: ${errorMessage(error)}`);
     }
+    process.exitCode = 1;
+    return;
+  }
+
+  // Antes de abrir o Chromium: uma segunda cópia usaria o mesmo perfil e a
+  // mesma sessão, e o estrago aparece como mensagem repetida no celular de quem
+  // mora aqui.
+  let releaseSingleInstance: () => void;
+
+  try {
+    releaseSingleInstance = claimSingleInstance(config.lockPath);
+  } catch (error) {
+    console.error(errorMessage(error));
     process.exitCode = 1;
     return;
   }
@@ -207,6 +221,8 @@ async function main(): Promise<void> {
     } catch {
       console.error("Não foi possível encerrar o cliente do WhatsApp de forma limpa.");
     }
+
+    releaseSingleInstance();
   }
 }
 

@@ -16,6 +16,7 @@ function configWithPhones(...targetPhones: string[]): AppConfig {
     authDataPath: ".wwebjs_auth",
     webCachePath: ".wwebjs_cache",
     statePath: ".state.json",
+    lockPath: ".lock",
     targetPhones,
     demoFormats: [],
     pollIntervalMs: 15_000,

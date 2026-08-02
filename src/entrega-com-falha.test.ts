@@ -21,6 +21,7 @@ function config(statePath: string): AppConfig {
     authDataPath: ".auth",
     webCachePath: ".cache",
     statePath,
+    lockPath: `${statePath}.lock`,
     targetPhones: ["5511981090986"],
     supabaseUrl: "https://project.supabase.co",
     supabaseAnonKey: "anon-publica",

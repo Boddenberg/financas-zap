@@ -10,6 +10,8 @@ export type AppConfig = {
   authDataPath: string;
   webCachePath: string;
   statePath: string;
+  /** Onde fica o PID da ponte, para não existirem duas na mesma pasta. */
+  lockPath: string;
   targetPhones: string[];
   groupId?: string;
   supabaseUrl?: string;
@@ -275,6 +277,9 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
       process.cwd(),
       process.env.STATE_PATH?.trim() || ".runtime/casa-notifications.json",
     ),
+    // A trava acompanha a pasta, não o estado: o que não pode ser dividido é a
+    // sessão do WhatsApp, que mora aqui em `.wwebjs_auth`.
+    lockPath: path.resolve(process.cwd(), ".runtime/financas-zap.lock"),
     targetPhones,
     groupId,
     demoFormats: readDemoFormats(args),
