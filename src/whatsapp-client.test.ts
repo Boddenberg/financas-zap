@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Client } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 import {
+  createWhatsAppClient,
   resolveDestinations,
   sendAndWaitForServerAcknowledgement,
 } from "./whatsapp-client";
@@ -21,6 +22,24 @@ function configWithPhones(...targetPhones: string[]): AppConfig {
     timeZone: "America/Sao_Paulo",
   };
 }
+
+test("o Chromium sobe enxuto, sem apagar o que o Puppeteer já desliga", () => {
+  const client = createWhatsAppClient({
+    ...configWithPhones(),
+    mode: "watch",
+  }) as unknown as { options?: { puppeteer?: { args?: string[] } } };
+  const args = client.options?.puppeteer?.args ?? [];
+
+  assert.ok(args.includes("--renderer-process-limit=1"));
+  assert.ok(args.includes("--disable-software-rasterizer"));
+
+  // O Chromium fica com a última ocorrência de cada chave: um --disable-features
+  // nosso substituiria a lista inteira que o Puppeteer monta.
+  assert.deepEqual(
+    args.filter((argument) => argument.startsWith("--disable-features")),
+    [],
+  );
+});
 
 test("usa o ID direto quando a consulta de número do WhatsApp falha", async () => {
   const client = {

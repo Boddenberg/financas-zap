@@ -57,6 +57,36 @@ function sameBrazilianNumber(first: string, second: string): boolean {
   return normalizeLegacyMobile(first) === normalizeLegacyMobile(second);
 }
 
+/**
+ * O que o Chromium não precisa carregar para entregar quatro mensagens por dia.
+ *
+ * Esta ponte fica ligada o dia inteiro numa máquina que é de trabalho, não de
+ * servidor: cada processo e cada megabyte que ela dispensa é um que sobra para
+ * quem está usando o computador. O Puppeteer já desliga extensões, sincronismo
+ * e telemetria por conta própria; aqui vai só o que falta.
+ *
+ * Não acrescente um segundo `--disable-features`: o Chromium fica com a última
+ * ocorrência da chave e a lista padrão do Puppeteer seria descartada junto.
+ */
+const CHROMIUM_ENXUTO = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  // Sem GPU e sem o rasterizador por software, que subiria um processo só para
+  // desenhar uma página que ninguém olha.
+  "--disable-gpu",
+  "--disable-software-rasterizer",
+  // A conversa é lida no celular: aqui não toca som nem sobe aviso do sistema.
+  "--mute-audio",
+  "--disable-notifications",
+  // Uma aba, um renderizador.
+  "--renderer-process-limit=1",
+  // O cache é conveniência do navegador, não memória da ponte: 32 MB de disco
+  // bastam para não rebaixar a sessão e seguram o crescimento do perfil.
+  "--disk-cache-size=33554432",
+  "--media-cache-size=16777216",
+];
+
 export function createWhatsAppClient(config: AppConfig): Client {
   return new Client({
     authStrategy: new LocalAuth({
@@ -68,12 +98,7 @@ export function createWhatsAppClient(config: AppConfig): Client {
     },
     puppeteer: {
       headless: config.headless,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-        "--disable-gpu",
-      ],
+      args: [...CHROMIUM_ENXUTO],
     },
   });
 }

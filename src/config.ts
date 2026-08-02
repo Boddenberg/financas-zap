@@ -130,8 +130,17 @@ function readMode(args: string[]): RunMode {
   return "watch";
 }
 
+/**
+ * De quanto em quanto tempo a ponte acorda.
+ *
+ * O intervalo é o relógio da Casa, e nada do que ela manda é urgente ao
+ * segundo: o resumo do dia tem hora marcada, o panorama tem dia marcado e o
+ * bloco fecha depois de uma espera que o próprio backend define. Um minuto de
+ * atraso não muda nenhum deles — e é o que separa uma máquina que cochila de
+ * uma que é acordada quatro mil vezes por dia.
+ */
 function readPollInterval(): number {
-  const rawValue = process.env.POLL_INTERVAL_SECONDS?.trim() || "15";
+  const rawValue = process.env.POLL_INTERVAL_SECONDS?.trim() || "60";
   const seconds = Number(rawValue);
 
   if (!Number.isInteger(seconds) || seconds < 5 || seconds > 3600) {
