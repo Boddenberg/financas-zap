@@ -21,7 +21,11 @@ periódico nasceria. Quem decide o que venceu continua sendo o backend.
 - `message-monitor.ts` coordena pulso, leitura, ordenação, entrega, confirmação
   e avanço do cursor.
 - `state-store.ts` garante retomada e idempotência local.
+- `single-instance.ts` impede duas pontes na mesma pasta.
+- `log-file.ts` é o diário de quem roda sem tela; ele espelha o console e
+  nunca é condição para entregar.
 - `config.ts` valida toda entrada de ambiente antes de iniciar.
+- `scripts/` é a instalação no Windows, e só isso: nada de regra de negócio ali.
 - O contrato da leitura é a função `ler_mensagens_whatsapp_casa` e o da
   confirmação é `confirmar_mensagem_whatsapp_casa`, ambas criadas pelas
   migrations canônicas em `../Financas/supabase/migrations`.
@@ -31,6 +35,14 @@ mesmo com o backend fora do ar.
 
 Tipos não tornam JSON externo confiável. Respostas do Supabase continuam entrando
 como `unknown` e são validadas antes de virar `OutboxMessage`.
+
+## Peso
+
+Esta ponte mora no computador de casa, ligada o dia inteiro. Toda mudança que
+acrescente processo, dependência, gravação frequente em disco ou trabalho a cada
+ciclo precisa se justificar contra isso. O que já foi decidido: Chromium sem GPU
+e com cache curto, um renderizador só, pulso a cada minuto, diário com teto e
+prioridade abaixo do normal herdada da tarefa do Windows.
 
 ## Segurança
 
