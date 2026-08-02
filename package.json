@@ -13,7 +13,10 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "demo:casa": "tsx src/index.ts --demo"
+    "demo:casa": "tsx src/index.ts --demo",
+    "windows:instalar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/instalar-inicializacao.ps1",
+    "windows:situacao": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/situacao.ps1",
+    "windows:remover": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/remover-inicializacao.ps1"
   },
   "engines": {
     "node": ">=20.9.0"
