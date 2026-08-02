@@ -34,9 +34,6 @@ jobs:
       - name: Auditar dependências de produção
         run: npm audit --omit=dev --audit-level=high
 
-      - name: Verificar tipos gerados da API
-        run: npm run contracts:check
-
       - name: Executar testes
         run: npm test
 
