@@ -2,6 +2,7 @@ import qrcode from "qrcode-terminal";
 import type { Client } from "whatsapp-web.js";
 import { BackendPulseClient } from "./backend-pulse";
 import { ConfigError, loadConfig } from "./config";
+import { mirrorConsoleToFile } from "./log-file";
 import { MessageMonitor } from "./message-monitor";
 import { StateStore } from "./state-store";
 import { SupabaseOutboxClient } from "./supabase-outbox-client";
@@ -72,6 +73,12 @@ async function waitUntilReady(client: Client, signal: AbortSignal): Promise<void
 }
 
 async function main(): Promise<void> {
+  // Antes da configuração de propósito: subindo com o Windows não há tela, e um
+  // .env recusado precisa deixar rastro tanto quanto uma entrega. Quem define o
+  // caminho é o atalho da inicialização, não o .env — que a esta altura ainda
+  // nem foi lido.
+  mirrorConsoleToFile(process.env.LOG_PATH);
+
   let config;
 
   try {
