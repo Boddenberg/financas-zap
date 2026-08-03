@@ -35,6 +35,7 @@ export type Recebimento = {
 };
 
 const SUFIXO_GRUPO = "@g.us";
+const SUFIXO_LID = "@lid";
 
 /**
  * O id que o WhatsApp deu à mensagem — a trava contra reentrega do outro lado.
@@ -74,6 +75,39 @@ function nomeDe(mensagem: Message): string | null {
   return typeof nome === "string" && nome.trim() !== "" ? nome.slice(0, 80) : null;
 }
 
+/**
+ * O telefone de quem falou, mesmo quando o envelope não o traz.
+ *
+ * Contas com privacidade ligada aparecem por um **LID** (`61100221534218@lid`)
+ * em vez do número. O LID engana porque tem cara de telefone — quatorze dígitos
+ * passam por qualquer validação de E.164 —, e seguiria adiante como se fosse
+ * uma pessoa. O pareamento nunca bateria: o número que o dono digita na tela é
+ * o de verdade, e o que chegaria aqui seria outro.
+ *
+ * Quando o jid é um LID, o número sai do contato. Se não sair, a mensagem é
+ * descartada — repassar um LID criaria identidade para um telefone inexistente.
+ */
+export async function numeroDeQuemFalou(
+  mensagem: Message,
+  jid: string | null | undefined,
+): Promise<string> {
+  if (!jid?.endsWith(SUFIXO_LID)) {
+    return numeroDoJid(jid);
+  }
+
+  try {
+    const contato = await mensagem.getContact();
+    const doContato =
+      (typeof contato?.number === "string" && contato.number) ||
+      (typeof contato?.id?.user === "string" && contato.id.user) ||
+      "";
+    return doContato.replace(/\D/g, "");
+  } catch {
+    // Sem contato não há número, e um LID no lugar dele é pior do que nada.
+    return "";
+  }
+}
+
 /** Só os dígitos do jid: `5511999999999@c.us` vira `5511999999999`. */
 export function numeroDoJid(jid: string | null | undefined): string {
   return (jid ?? "").split("@")[0]?.replace(/\D/g, "") ?? "";
@@ -87,7 +121,7 @@ export function numeroDoJid(jid: string | null | undefined): string {
  * depois: repassar um anexo vazio faria o backend responder a uma frase que
  * ninguém escreveu.
  */
-export function envelopeDe(mensagem: Message): EnvelopeRecebido | null {
+export async function envelopeDe(mensagem: Message): Promise<EnvelopeRecebido | null> {
   if (mensagem.fromMe) return null;
 
   const texto = (mensagem.body ?? "").trim();
@@ -97,7 +131,7 @@ export function envelopeDe(mensagem: Message): EnvelopeRecebido | null {
   const ehGrupo = conversaId.endsWith(SUFIXO_GRUPO);
   // Num grupo, `from` é o grupo e quem falou vem em `author`. Errar isto faz o
   // grupo inteiro parecer um desconhecido para o backend.
-  const de = numeroDoJid(ehGrupo ? mensagem.author : conversaId);
+  const de = await numeroDeQuemFalou(mensagem, ehGrupo ? mensagem.author : conversaId);
   if (!/^[1-9][0-9]{7,14}$/.test(de)) return null;
 
   const grupo = ehGrupo ? numeroDoJid(conversaId) : null;

@@ -48,8 +48,8 @@ async function ligarOAgente(
     config,
   );
 
-  const repassar = (mensagem: Message): void => {
-    const envelope = envelopeDe(mensagem);
+  const repassar = async (mensagem: Message): Promise<void> => {
+    const envelope = await envelopeDe(mensagem);
     if (!envelope) {
       // Vale uma linha: sem ela, "nada aconteceu" não distingue "o evento não
       // chegou" de "chegou e eu descartei", e as duas causas são muito
@@ -86,8 +86,14 @@ async function ligarOAgente(
   // deles dispara para uma conversa nova, e o custo de ouvir os dois é uma
   // requisição repetida que o índice único do backend descarta — enquanto o
   // custo de ouvir só o errado é a mensagem sumir sem deixar rastro.
-  client.on("message", repassar);
-  client.on("message_create", repassar);
+  const ouvir = (mensagem: Message): void => {
+    void repassar(mensagem).catch((erro: unknown) => {
+      console.error(`Falha ao ler a mensagem recebida: ${errorMessage(erro)}`);
+    });
+  };
+
+  client.on("message", ouvir);
+  client.on("message_create", ouvir);
 
   console.log("Canal de conversa do agente ligado.");
   return monitor.rodar(sinal);
