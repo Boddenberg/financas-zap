@@ -17,6 +17,18 @@ export type AppConfig = {
   supabaseUrl?: string;
   supabaseAnonKey?: string;
   bridgeToken?: string;
+  /**
+   * A chave do **canal de conversa**, gerada em `POST /whatsapp/ponte`.
+   *
+   * São duas chaves de propósito: a da Casa lê resumo de faxina, esta alcança
+   * dinheiro e documentos. Revogar uma não pode obrigar a revogar a outra.
+   * Ausente, a ponte roda só o canal da Casa — que é como ela sempre rodou.
+   */
+  agenteChave?: string;
+  /** Alguém está esperando resposta: o laço acelera. */
+  agentePollAtivoMs: number;
+  /** Ninguém perguntou nada: o laço cochila. */
+  agentePollParadoMs: number;
   financasApiUrl?: string;
   /** Quais prévias o modo `--demo` pede. `undefined` = números inventados. */
   demoFormats: Array<string | undefined>;
@@ -217,6 +229,47 @@ function readBridgeToken(): string {
   return token;
 }
 
+/**
+ * A chave do canal de conversa, se ela existir.
+ *
+ * Opcional porque a ponte precisa continuar subindo com o canal da Casa
+ * sozinho — foi assim durante meses, e uma chave que ainda não foi gerada não
+ * pode impedir o resumo do dia de sair.
+ */
+function readAgenteChave(): string | undefined {
+  const chave = process.env.AGENTE_PONTE_CHAVE?.trim();
+
+  if (!chave) {
+    return undefined;
+  }
+
+  if (!chave.startsWith("wpp_") || chave.length < 36) {
+    throw new ConfigError(
+      "AGENTE_PONTE_CHAVE não parece uma chave gerada em Ajustes > WhatsApp.",
+    );
+  }
+
+  return chave;
+}
+
+function readIntervaloDoAgente(nome: string, padrao: number): number {
+  const bruto = process.env[nome]?.trim();
+
+  if (!bruto) {
+    return padrao;
+  }
+
+  const ms = Number(bruto);
+
+  if (!Number.isInteger(ms) || ms < 500 || ms > 600_000) {
+    throw new ConfigError(
+      `${nome} deve ser um número inteiro de milissegundos entre 500 e 600000.`,
+    );
+  }
+
+  return ms;
+}
+
 function validateTimeZone(value: string): string {
   try {
     new Intl.DateTimeFormat("pt-BR", { timeZone: value }).format(new Date());
@@ -255,6 +308,7 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
           supabaseUrl: normalizeUrl("SUPABASE_URL", required("SUPABASE_URL")),
           supabaseAnonKey: required("SUPABASE_ANON_KEY"),
           bridgeToken: readBridgeToken(),
+          agenteChave: readAgenteChave(),
           // Sem o pulso não existe resumo diário, panorama nem fechamento de
           // bloco: quem decide que chegou a hora é o backend, e ele só fica
           // sabendo que "agora" chegou porque esta ponte o avisa.
@@ -284,6 +338,8 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     groupId,
     demoFormats: readDemoFormats(args),
     pollIntervalMs: readPollInterval(),
+    agentePollAtivoMs: readIntervaloDoAgente("AGENTE_POLL_ATIVO_MS", 2_000),
+    agentePollParadoMs: readIntervaloDoAgente("AGENTE_POLL_PARADO_MS", 15_000),
     timeZone: validateTimeZone(process.env.APP_TIMEZONE?.trim() || "America/Sao_Paulo"),
     ...watchConfig,
   };

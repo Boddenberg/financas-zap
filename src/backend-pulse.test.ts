@@ -19,6 +19,8 @@ function config(): AppConfig {
     financasApiUrl: "https://financas.example/api/v1",
     demoFormats: [],
     pollIntervalMs: 15_000,
+    agentePollAtivoMs: 2_000,
+    agentePollParadoMs: 15_000,
     timeZone: "America/Sao_Paulo",
   };
 }

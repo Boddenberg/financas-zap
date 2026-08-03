@@ -1,5 +1,9 @@
+import path from "node:path";
 import qrcode from "qrcode-terminal";
-import type { Client } from "whatsapp-web.js";
+import type { Client, Message } from "whatsapp-web.js";
+import { CaixaDoAgente } from "./agente/caixa";
+import { EntradaDoAgente, envelopeDe } from "./agente/entrada";
+import { MonitorDoAgente } from "./agente/monitor";
 import { BackendPulseClient } from "./backend-pulse";
 import { ConfigError, loadConfig } from "./config";
 import { mirrorConsoleToFile } from "./log-file";
@@ -16,6 +20,54 @@ import {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Erro desconhecido.";
+}
+
+/**
+ * O canal de conversa: escuta o que chega e entrega o que o agente respondeu.
+ *
+ * A escuta e o laço são separados de propósito. Repassar é imediato — o backend
+ * responde `202` e trabalha atrás —, e a resposta aparece na caixa segundos
+ * depois, que é o que o laço busca. Segurar a conexão da ponte esperando o
+ * agente pensar seria frágil num Wi-Fi de casa.
+ */
+async function ligarOAgente(
+  client: Client,
+  config: import("./config").AppConfig,
+  sinal: AbortSignal,
+): Promise<Promise<void>> {
+  const caixa = new CaixaDoAgente(config);
+  const entrada = new EntradaDoAgente(config);
+  await caixa.conectar();
+
+  const monitor = new MonitorDoAgente(
+    client,
+    caixa,
+    entrada,
+    // Cursor próprio: o do canal da Casa continua sendo só dele.
+    new StateStore(path.resolve(process.cwd(), ".runtime/agente-whatsapp.json")),
+    config,
+  );
+
+  client.on("message", (mensagem: Message) => {
+    const envelope = envelopeDe(mensagem);
+    if (!envelope) return;
+
+    void entrada
+      .entregar(envelope)
+      .then((recibo) => {
+        if (recibo.aceita && !recibo.duplicada) {
+          monitor.aguardarResposta();
+        }
+      })
+      .catch((erro: unknown) => {
+        // Uma mensagem perdida aqui não pode derrubar a ponte: quem escreveu
+        // reenvia, e o índice único do backend cuida da repetição.
+        console.error(`Falha ao repassar a mensagem recebida: ${errorMessage(erro)}`);
+      });
+  });
+
+  console.log("Canal de conversa do agente ligado.");
+  return monitor.rodar(sinal);
 }
 
 function connectedAccountDescription(client: Client): string {
@@ -203,7 +255,22 @@ async function main(): Promise<void> {
       config,
       pulse,
     );
-    await monitor.run(abortController.signal);
+
+    // O canal de conversa é o segundo laço, e ele é opcional: sem
+    // AGENTE_PONTE_CHAVE a ponte roda só os avisos da Casa, como sempre rodou.
+    const agente = config.agenteChave
+      ? await ligarOAgente(client, config, abortController.signal)
+      : null;
+    if (!agente) {
+      console.log(
+        "Canal de conversa desligado (sem AGENTE_PONTE_CHAVE). Só os avisos da Casa.",
+      );
+    }
+
+    await Promise.all([
+      monitor.run(abortController.signal),
+      agente ?? Promise.resolve(),
+    ]);
 
     if (disconnectedReason !== undefined) {
       throw new Error(
