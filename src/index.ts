@@ -48,13 +48,29 @@ async function ligarOAgente(
     config,
   );
 
-  client.on("message", (mensagem: Message) => {
+  const repassar = (mensagem: Message): void => {
     const envelope = envelopeDe(mensagem);
-    if (!envelope) return;
+    if (!envelope) {
+      // Vale uma linha: sem ela, "nada aconteceu" não distingue "o evento não
+      // chegou" de "chegou e eu descartei", e as duas causas são muito
+      // diferentes de investigar.
+      console.log(
+        `Mensagem ignorada pela ponte (própria conta, sem texto ou remetente irreconhecível).`,
+      );
+      return;
+    }
 
     void entrada
       .entregar(envelope)
       .then((recibo) => {
+        const desfecho = recibo.duplicada
+          ? "já conhecida"
+          : recibo.aceita
+            ? "aceita"
+            : "ignorada pelo Finanças (número não pareado, grupo ou limite)";
+        console.log(
+          `Mensagem de ${envelope.de}${envelope.grupo ? ` no grupo ${envelope.grupo}` : ""}: ${desfecho}.`,
+        );
         if (recibo.aceita && !recibo.duplicada) {
           monitor.aguardarResposta();
         }
@@ -64,7 +80,14 @@ async function ligarOAgente(
         // reenvia, e o índice único do backend cuida da repetição.
         console.error(`Falha ao repassar a mensagem recebida: ${errorMessage(erro)}`);
       });
-  });
+  };
+
+  // Os dois eventos de propósito. Versões do `whatsapp-web.js` divergem em qual
+  // deles dispara para uma conversa nova, e o custo de ouvir os dois é uma
+  // requisição repetida que o índice único do backend descarta — enquanto o
+  // custo de ouvir só o errado é a mensagem sumir sem deixar rastro.
+  client.on("message", repassar);
+  client.on("message_create", repassar);
 
   console.log("Canal de conversa do agente ligado.");
   return monitor.rodar(sinal);
