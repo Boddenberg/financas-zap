@@ -87,13 +87,19 @@ test("sem id nenhum, o derivado é o mesmo para a mesma mensagem", async () => {
   assert.equal(primeiro?.waId, segundo?.waId);
 });
 
-test("um LID vira o telefone de verdade, tirado do contato", async () => {
+const clienteQueTraduz = {
+  async getContactLidAndPhone(ids: string[]) {
+    return ids.map((lid) => ({ lid, pn: "5511981090986@c.us" }));
+  },
+};
+
+test("um LID vira o telefone de verdade pela tradução da biblioteca", async () => {
   const envelope = await envelopeDe(
     mensagem({
       from: "120363411589990438@g.us",
       author: "61100221534218@lid",
-      getContact: async () => ({ number: "5511981090986" }),
     } as unknown as Partial<Message>),
+    clienteQueTraduz,
   );
 
   // O LID tem catorze dígitos e passaria por qualquer validação de E.164 — é
@@ -101,7 +107,29 @@ test("um LID vira o telefone de verdade, tirado do contato", async () => {
   assert.equal(envelope?.de, "5511981090986");
 });
 
-test("LID sem contato é descartado em vez de virar identidade falsa", async () => {
+test("sem tradução, o contato ainda é tentado", async () => {
+  const envelope = await envelopeDe(
+    mensagem({
+      from: "61100221534218@lid",
+      getContact: async () => ({ number: "5511972435718" }),
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(envelope?.de, "5511972435718");
+});
+
+test("contato que devolve o próprio LID não resolve nada", async () => {
+  const envelope = await envelopeDe(
+    mensagem({
+      from: "61100221534218@lid",
+      getContact: async () => ({ id: { user: "61100221534218" } }),
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(envelope, null);
+});
+
+test("LID sem tradução nem contato é descartado", async () => {
   const envelope = await envelopeDe(
     mensagem({
       from: "61100221534218@lid",

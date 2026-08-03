@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { Message } from "whatsapp-web.js";
+import type { Client, Message } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
 import { erroDaResposta } from "./http";
@@ -90,9 +90,27 @@ function nomeDe(mensagem: Message): string | null {
 export async function numeroDeQuemFalou(
   mensagem: Message,
   jid: string | null | undefined,
+  client?: Pick<Client, "getContactLidAndPhone">,
 ): Promise<string> {
   if (!jid?.endsWith(SUFIXO_LID)) {
     return numeroDoJid(jid);
+  }
+
+  // O caminho oficial: a própria biblioteca traduz LID em telefone. O contato
+  // não serve para isto — numa conta que só se apresenta por LID, o `number`
+  // dele vem vazio e o `id.user` devolve o mesmo LID de volta.
+  if (client) {
+    try {
+      const pares = await client.getContactLidAndPhone([jid]);
+      const telefone = pares?.[0]?.pn;
+      if (typeof telefone === "string") {
+        const digitos = telefone.replace(/\D/g, "");
+        if (digitos) return digitos;
+      }
+    } catch {
+      // Cai para o contato abaixo — melhor uma segunda tentativa do que perder
+      // a mensagem por causa de uma consulta que falhou.
+    }
   }
 
   try {
@@ -101,9 +119,11 @@ export async function numeroDeQuemFalou(
       (typeof contato?.number === "string" && contato.number) ||
       (typeof contato?.id?.user === "string" && contato.id.user) ||
       "";
-    return doContato.replace(/\D/g, "");
+    const digitos = doContato.replace(/\D/g, "");
+    // Se o "número" do contato é o próprio LID, ele não resolve nada.
+    return digitos === numeroDoJid(jid) ? "" : digitos;
   } catch {
-    // Sem contato não há número, e um LID no lugar dele é pior do que nada.
+    // Sem número não há pessoa, e um LID no lugar dele é pior do que nada.
     return "";
   }
 }
@@ -121,7 +141,10 @@ export function numeroDoJid(jid: string | null | undefined): string {
  * depois: repassar um anexo vazio faria o backend responder a uma frase que
  * ninguém escreveu.
  */
-export async function envelopeDe(mensagem: Message): Promise<EnvelopeRecebido | null> {
+export async function envelopeDe(
+  mensagem: Message,
+  client?: Pick<Client, "getContactLidAndPhone">,
+): Promise<EnvelopeRecebido | null> {
   if (mensagem.fromMe) return null;
 
   const texto = (mensagem.body ?? "").trim();
@@ -131,7 +154,11 @@ export async function envelopeDe(mensagem: Message): Promise<EnvelopeRecebido | 
   const ehGrupo = conversaId.endsWith(SUFIXO_GRUPO);
   // Num grupo, `from` é o grupo e quem falou vem em `author`. Errar isto faz o
   // grupo inteiro parecer um desconhecido para o backend.
-  const de = await numeroDeQuemFalou(mensagem, ehGrupo ? mensagem.author : conversaId);
+  const de = await numeroDeQuemFalou(
+    mensagem,
+    ehGrupo ? mensagem.author : conversaId,
+    client,
+  );
   if (!/^[1-9][0-9]{7,14}$/.test(de)) return null;
 
   const grupo = ehGrupo ? numeroDoJid(conversaId) : null;
