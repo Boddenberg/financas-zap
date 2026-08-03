@@ -11,13 +11,18 @@ import type { EntradaDoAgente } from "./entrada";
 import { MonitorDoAgente } from "./monitor";
 
 /**
- * Duas garantias, e as duas vêm do canal ser uma conversa e não um aviso:
+ * Quatro garantias, e todas vêm do canal ser uma conversa e não um aviso:
  *
  * 1. **o endereço não é montado aqui.** A resposta vai para o `jid` que veio da
  *    caixa — uma resposta de grupo termina em `@g.us`, e concatenar `@c.us` no
  *    telefone mandaria a conversa do casal para um número inexistente;
- * 2. **falhar no envio não perde a resposta.** Ela é devolvida como não
- *    entregue e volta na leitura seguinte.
+ * 2. **falhar no envio não perde a resposta.** Ela é confirmada como não
+ *    entregue **e o cursor não passa por cima dela**, senão a leitura seguinte
+ *    (que pede `criada_em > cursor`) nunca mais a traria;
+ * 3. **documento não leva legenda.** O WhatsApp não exibe a legenda de um
+ *    documento: mandar a frase ali é perdê-la, e a pessoa recebe três PDFs sem
+ *    uma linha dizendo o que são;
+ * 4. **imagem leva.** A arte da Casa continua chegando numa bolha só.
  */
 
 function config(statePath: string): AppConfig {
@@ -43,16 +48,27 @@ function config(statePath: string): AppConfig {
   };
 }
 
-function resposta(jid: string): MensagemDaCaixa {
+function resposta(
+  jid: string,
+  anexos: MensagemDaCaixa["anexos"] = [],
+  id = "22222222-2222-2222-2222-222222222222",
+): MensagemDaCaixa {
   return {
-    id: "22222222-2222-2222-2222-222222222222",
+    id,
     jid,
     texto: "Anotei a louça.",
     // Mais nova que o cursor, que nasce no instante em que a ponte sobe.
     criadaEm: new Date(Date.now() + 1_000).toISOString(),
-    anexos: [],
+    anexos,
   };
 }
+
+const PDF = {
+  nome: "reserva.pdf",
+  mime: "application/pdf",
+  conteudoBase64: "JVBERi0=",
+};
+const PNG = { nome: "casa.png", mime: "image/png", conteudoBase64: "iVBORw0=" };
 
 function caixaFalsa(mensagens: MensagemDaCaixa[]) {
   const confirmadas: Array<{ id: string; entregue: boolean }> = [];
@@ -67,6 +83,22 @@ function caixaFalsa(mensagens: MensagemDaCaixa[]) {
     },
   } as unknown as CaixaDoAgente;
   return { caixa, confirmadas };
+}
+
+/** Registra o que foi para o WhatsApp, na ordem. */
+function clienteFalso() {
+  const enviadas: Array<{ jid: string; tipo: string; legenda?: string }> = [];
+  const client = {
+    async sendMessage(jid: string, conteudo: unknown, opcoes?: { caption?: string }) {
+      const media = conteudo as { mimetype?: string };
+      enviadas.push({
+        jid,
+        tipo: typeof conteudo === "string" ? "texto" : (media.mimetype ?? "?"),
+        legenda: opcoes?.caption,
+      });
+    },
+  } as unknown as Client;
+  return { client, enviadas };
 }
 
 const entradaFalsa = {
@@ -131,6 +163,109 @@ test("envio que falha é confirmado como não entregue", async () => {
 
     assert.equal(entregues, 0);
     assert.equal(confirmadas[0]?.entregue, false);
+  });
+});
+
+test("o cursor não passa por cima de uma resposta que não foi entregue", async () => {
+  await comPasta(async (statePath) => {
+    const client = {
+      async sendMessage() {
+        throw new Error("o WhatsApp recusou");
+      },
+    } as unknown as Client;
+    const { caixa } = caixaFalsa([resposta("5511946316274@c.us")]);
+    const store = new StateStore(statePath);
+    const antes = await store.loadOrCreate();
+
+    const monitor = new MonitorDoAgente(
+      client,
+      caixa,
+      entradaFalsa,
+      store,
+      config(statePath),
+    );
+    await monitor.bater();
+
+    const depois = await store.loadOrCreate();
+    assert.equal(depois.cursorAt, antes.cursorAt, "o cursor não pode avançar");
+    assert.deepEqual(depois.cursorIds, antes.cursorIds);
+  });
+});
+
+test("uma falha segura a fila atrás dela em vez de furar a ordem", async () => {
+  await comPasta(async (statePath) => {
+    const { client, enviadas } = clienteFalso();
+    let tentativas = 0;
+    const quebrado = {
+      async sendMessage(jid: string, conteudo: unknown, opcoes?: { caption?: string }) {
+        tentativas += 1;
+        if (tentativas === 1) {
+          throw new Error("o WhatsApp recusou");
+        }
+        return client.sendMessage(jid, conteudo as string, opcoes);
+      },
+    } as unknown as Client;
+    const { caixa } = caixaFalsa([
+      resposta("5511946316274@c.us", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5511946316274@c.us", [], "33333333-3333-3333-3333-333333333333"),
+    ]);
+
+    const monitor = new MonitorDoAgente(
+      quebrado,
+      caixa,
+      entradaFalsa,
+      new StateStore(statePath),
+      config(statePath),
+    );
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, [], "a segunda resposta não pode passar na frente");
+  });
+});
+
+test("o texto vai sozinho quando o anexo é documento", async () => {
+  await comPasta(async (statePath) => {
+    const { client, enviadas } = clienteFalso();
+    const { caixa } = caixaFalsa([resposta("5511946316274@c.us", [PDF, PDF])]);
+
+    const monitor = new MonitorDoAgente(
+      client,
+      caixa,
+      entradaFalsa,
+      new StateStore(statePath),
+      config(statePath),
+    );
+    await monitor.bater();
+
+    assert.deepEqual(
+      enviadas.map((envio) => envio.tipo),
+      ["texto", "application/pdf", "application/pdf"],
+    );
+    assert.equal(
+      enviadas.every((envio) => envio.legenda === undefined),
+      true,
+      "o WhatsApp não exibe legenda de documento",
+    );
+  });
+});
+
+test("a imagem continua levando o texto na legenda", async () => {
+  await comPasta(async (statePath) => {
+    const { client, enviadas } = clienteFalso();
+    const { caixa } = caixaFalsa([resposta("5511946316274@c.us", [PNG])]);
+
+    const monitor = new MonitorDoAgente(
+      client,
+      caixa,
+      entradaFalsa,
+      new StateStore(statePath),
+      config(statePath),
+    );
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, [
+      { jid: "5511946316274@c.us", tipo: "image/png", legenda: "Anotei a louça." },
+    ]);
   });
 });
 

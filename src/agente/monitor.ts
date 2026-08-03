@@ -2,7 +2,7 @@ import { Client, MessageMedia } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
 import { advanceCursor, isAfterCursor, StateStore } from "../state-store";
-import type { CaixaDoAgente, MensagemDaCaixa } from "./caixa";
+import type { AnexoDaCaixa, CaixaDoAgente, MensagemDaCaixa } from "./caixa";
 import type { EntradaDoAgente } from "./entrada";
 
 /**
@@ -78,6 +78,20 @@ export class MonitorDoAgente {
     }
   }
 
+  /**
+   * O cursor só passa por cima do que **foi entregue**.
+   *
+   * Antes ele avançava de qualquer jeito, e o efeito era o contrário do que o
+   * `confirmar(entregue=false)` promete: a mensagem continuava `pendente` no
+   * banco, mas a leitura seguinte pede `criada_em > cursor` e nunca mais a
+   * traria. Ela ficava pendurada para sempre, sem ninguém para reentregá-la.
+   *
+   * Parar na primeira falha é a outra metade da mesma decisão. É ela que dá
+   * sentido ao teto de cinco tentativas do backend: uma resposta envenenada
+   * segura a fila atrás dela por algumas voltas e então é descartada sozinha.
+   * Pular por cima manteria a ordem da conversa quebrada — a resposta de uma
+   * pergunta chegando depois da resposta da seguinte.
+   */
   private async entregarPendentes(): Promise<number> {
     const estado = await this.store.loadOrCreate();
     let entregues = 0;
@@ -86,11 +100,11 @@ export class MonitorDoAgente {
       if (!isAfterCursor(estado, { id: mensagem.id, createdAt: mensagem.criadaEm })) {
         continue;
       }
-      const entregue = await this.enviar(mensagem);
-      if (entregue) {
-        entregues += 1;
-        this.aguardando = Math.max(0, this.aguardando - 1);
+      if (!(await this.enviar(mensagem))) {
+        break;
       }
+      entregues += 1;
+      this.aguardando = Math.max(0, this.aguardando - 1);
       advanceCursor(estado, { id: mensagem.id, createdAt: mensagem.criadaEm });
       await this.store.save(estado);
     }
@@ -102,7 +116,10 @@ export class MonitorDoAgente {
     try {
       await this.despachar(mensagem);
       await this.caixa.confirmar(mensagem.id, true);
-      console.log(`Resposta ${mensagem.id} entregue em ${mensagem.jid}.`);
+      console.log(
+        `Resposta ${mensagem.id} entregue em ${mensagem.jid}` +
+          `${mensagem.anexos.length ? ` com ${mensagem.anexos.length} anexo(s)` : ""}.`,
+      );
       return true;
     } catch (erro) {
       const motivo = texto(erro);
@@ -117,11 +134,17 @@ export class MonitorDoAgente {
   }
 
   /**
-   * O texto vai como legenda do primeiro anexo; os demais vão sem legenda.
+   * O texto e os arquivos, na ordem que cada tipo de anexo aceita.
    *
-   * Duas mensagens (arte e texto) chegariam como duas notificações, e a segunda
-   * descolaria da primeira em qualquer conversa movimentada — é a mesma razão
-   * pela qual o aviso da Casa já viaja assim.
+   * **Imagem tem legenda; documento não.** A arte da Casa vai com o texto na
+   * legenda de propósito: duas mensagens chegariam como duas notificações, e a
+   * segunda descolaria da primeira em qualquer conversa movimentada.
+   *
+   * Com PDF isso não funciona. O WhatsApp guarda a legenda de um documento no
+   * protocolo mas não a exibe — a bolha mostra o nome do arquivo e nada mais.
+   * Mandar a frase ali é perdê-la: a pessoa recebe três PDFs sem uma linha
+   * dizendo o que são. Então, quando o primeiro anexo é documento, o texto vai
+   * primeiro, sozinho, e os arquivos vêm logo atrás.
    */
   private async despachar(mensagem: MensagemDaCaixa): Promise<void> {
     const [primeiro, ...demais] = mensagem.anexos;
@@ -133,26 +156,36 @@ export class MonitorDoAgente {
       return;
     }
 
+    if (ehImagem(primeiro)) {
+      await this.enviarAnexo(mensagem.jid, primeiro, mensagem.texto);
+      for (const anexo of demais) {
+        await this.enviarAnexo(mensagem.jid, anexo);
+      }
+      return;
+    }
+
+    await this.client.sendMessage(mensagem.jid, mensagem.texto, {
+      waitUntilMsgSent: true,
+    });
+    for (const anexo of mensagem.anexos) {
+      await this.enviarAnexo(mensagem.jid, anexo);
+    }
+  }
+
+  private async enviarAnexo(
+    jid: string,
+    anexo: AnexoDaCaixa,
+    legenda?: string,
+  ): Promise<void> {
     await this.client.sendMessage(
-      mensagem.jid,
-      new MessageMedia(primeiro.mime, primeiro.conteudoBase64, primeiro.nome),
+      jid,
+      new MessageMedia(anexo.mime, anexo.conteudoBase64, anexo.nome),
       {
         waitUntilMsgSent: true,
-        caption: mensagem.texto,
-        sendMediaAsDocument: !primeiro.mime.startsWith("image/"),
+        ...(legenda === undefined ? {} : { caption: legenda }),
+        sendMediaAsDocument: !ehImagem(anexo),
       },
     );
-
-    for (const anexo of demais) {
-      await this.client.sendMessage(
-        mensagem.jid,
-        new MessageMedia(anexo.mime, anexo.conteudoBase64, anexo.nome),
-        {
-          waitUntilMsgSent: true,
-          sendMediaAsDocument: !anexo.mime.startsWith("image/"),
-        },
-      );
-    }
   }
 
   private dormir(ms: number, sinal: AbortSignal): Promise<void> {
@@ -171,4 +204,8 @@ export class MonitorDoAgente {
 
 function texto(erro: unknown): string {
   return erro instanceof Error ? erro.message : String(erro);
+}
+
+function ehImagem(anexo: AnexoDaCaixa): boolean {
+  return anexo.mime.startsWith("image/");
 }
