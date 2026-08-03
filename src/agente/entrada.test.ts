@@ -65,3 +65,33 @@ test("o jid vira dígitos", () => {
   assert.equal(numeroDoJid("5511946316274@c.us"), "5511946316274");
   assert.equal(numeroDoJid(null), "");
 });
+
+test("sem `_serialized`, o id é montado das partes", () => {
+  const envelope = envelopeDe(
+    mensagem({
+      id: { fromMe: false, remote: "5511981090986@c.us", id: "3EB0ABC" },
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(envelope?.waId, "false_5511981090986@c.us_3EB0ABC");
+});
+
+test("sem id nenhum, o derivado é o mesmo para a mesma mensagem", () => {
+  const sem = { id: undefined } as unknown as Partial<Message>;
+  const primeiro = envelopeDe(mensagem(sem));
+  const segundo = envelopeDe(mensagem(sem));
+
+  // Determinístico de propósito: é isso que faz a reentrega bater no índice
+  // único do backend em vez de virar um segundo registro.
+  assert.match(primeiro?.waId ?? "", /^derivado_[0-9a-f]{40}$/);
+  assert.equal(primeiro?.waId, segundo?.waId);
+});
+
+test("mensagens diferentes derivam ids diferentes", () => {
+  const um = envelopeDe(mensagem({ id: undefined } as unknown as Partial<Message>));
+  const outro = envelopeDe(
+    mensagem({ id: undefined, body: "passei pano" } as unknown as Partial<Message>),
+  );
+
+  assert.notEqual(um?.waId, outro?.waId);
+});

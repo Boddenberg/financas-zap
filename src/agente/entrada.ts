@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Message } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
@@ -35,6 +36,39 @@ export type Recebimento = {
 
 const SUFIXO_GRUPO = "@g.us";
 
+/**
+ * O id que o WhatsApp deu à mensagem — a trava contra reentrega do outro lado.
+ *
+ * `id._serialized` é o caminho normal e é o que a tipagem promete, mas ele nem
+ * sempre chega preenchido no evento: quando isso acontece, o campo ia vazio e o
+ * backend recusava a mensagem inteira com 422. Daí a escada.
+ *
+ * O último degrau é derivado, e **precisa ser determinístico**: é ele que faz a
+ * reentrega da mesma mensagem cair no índice único do backend em vez de virar
+ * um segundo registro. Mesma conversa, mesmo segundo e mesmo texto são a mesma
+ * mensagem — um id aleatório aqui quebraria exatamente a garantia que ele existe
+ * para dar.
+ */
+export function idDaMensagem(mensagem: Message): string {
+  const id = mensagem.id as
+    | { _serialized?: unknown; id?: unknown; remote?: unknown; fromMe?: unknown }
+    | undefined;
+
+  const serializado = typeof id?._serialized === "string" ? id._serialized.trim() : "";
+  if (serializado) return serializado.slice(0, 120);
+
+  const bruto = typeof id?.id === "string" ? id.id.trim() : "";
+  if (bruto) {
+    const remoto = typeof id?.remote === "string" ? id.remote : String(id?.remote ?? "");
+    return `${id?.fromMe ? "true" : "false"}_${remoto}_${bruto}`.slice(0, 120);
+  }
+
+  const digest = createHash("sha1")
+    .update(`${mensagem.from ?? ""}|${mensagem.author ?? ""}|${mensagem.timestamp ?? 0}|${mensagem.body ?? ""}`)
+    .digest("hex");
+  return `derivado_${digest}`;
+}
+
 function nomeDe(mensagem: Message): string | null {
   const nome = (mensagem as { notifyName?: unknown }).notifyName;
   return typeof nome === "string" && nome.trim() !== "" ? nome.slice(0, 80) : null;
@@ -69,7 +103,7 @@ export function envelopeDe(mensagem: Message): EnvelopeRecebido | null {
   const grupo = ehGrupo ? numeroDoJid(conversaId) : null;
 
   return {
-    waId: mensagem.id?._serialized ?? "",
+    waId: idDaMensagem(mensagem),
     de,
     texto,
     conversa: ehGrupo ? "grupo" : "direta",
