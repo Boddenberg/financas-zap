@@ -73,7 +73,7 @@ async function ligarOAgente(
           ? "já conhecida"
           : recibo.aceita
             ? "aceita"
-            : "ignorada pelo Finanças (número não pareado, grupo ou limite)";
+            : `ignorada pelo Finanças${recibo.motivo ? ` (${recibo.motivo})` : ""}`;
         console.log(
           `Mensagem de ${envelope.de}${envelope.grupo ? ` no grupo ${envelope.grupo}` : ""}: ${desfecho}.`,
         );

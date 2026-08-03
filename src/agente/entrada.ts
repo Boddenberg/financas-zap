@@ -32,6 +32,8 @@ export type EnvelopeRecebido = {
 export type Recebimento = {
   aceita: boolean;
   duplicada: boolean;
+  /** Por que não virou resposta. O backend só conta à ponte, nunca ao WhatsApp. */
+  motivo?: string;
 };
 
 const SUFIXO_GRUPO = "@g.us";
@@ -218,10 +220,15 @@ export class EntradaDoAgente {
       );
     }
 
-    const corpo = (await resposta.json()) as { aceita?: unknown; duplicada?: unknown };
+    const corpo = (await resposta.json()) as {
+      aceita?: unknown;
+      duplicada?: unknown;
+      motivo?: unknown;
+    };
     return {
       aceita: corpo.aceita === true,
       duplicada: corpo.duplicada === true,
+      motivo: typeof corpo.motivo === "string" ? corpo.motivo : undefined,
     };
   }
 
