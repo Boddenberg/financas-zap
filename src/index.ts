@@ -49,6 +49,11 @@ async function ligarOAgente(
   );
 
   const repassar = async (mensagem: Message): Promise<void> => {
+    // O `message_create` também dispara para o que o próprio agente acabou de
+    // enviar. Isso não é descarte digno de nota — é o eco —, e registrá-lo
+    // enchia o diário de uma linha por resposta entregue.
+    if (mensagem.fromMe) return;
+
     const envelope = await envelopeDe(mensagem, client);
     if (!envelope) {
       // Vale uma linha: sem ela, "nada aconteceu" não distingue "o evento não
