@@ -54,6 +54,41 @@ test("mensagem sem texto não vira pergunta", async () => {
   assert.equal(await envelopeDe(mensagem({ body: "   " } as Partial<Message>)), null);
 });
 
+test("áudio do WhatsApp vira envelope para transcrição no backend", async () => {
+  const envelope = await envelopeDe(
+    mensagem({
+      body: "",
+      type: "ptt",
+      hasMedia: true,
+      downloadMedia: async () => ({
+        data: "b2dn",
+        mimetype: "audio/ogg; codecs=opus",
+        filename: undefined,
+      }),
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(envelope?.texto, null);
+  assert.deepEqual(envelope?.audio, {
+    nome: "audio-whatsapp.ogg",
+    tipoMime: "audio/ogg",
+    conteudoBase64: "b2dn",
+  });
+});
+
+test("imagem sem legenda continua fora do canal de conversa", async () => {
+  const envelope = await envelopeDe(
+    mensagem({
+      body: "",
+      type: "image",
+      hasMedia: true,
+      downloadMedia: async () => ({ data: "aW1hZ2Vt", mimetype: "image/jpeg" }),
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(envelope, null);
+});
+
 test("remetente sem número reconhecível é descartado", async () => {
   assert.equal(
     await envelopeDe(mensagem({ from: "status@broadcast" } as Partial<Message>)),

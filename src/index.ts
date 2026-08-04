@@ -2,7 +2,7 @@ import path from "node:path";
 import qrcode from "qrcode-terminal";
 import type { Client, Message } from "whatsapp-web.js";
 import { CaixaDoAgente } from "./agente/caixa";
-import { EntradaDoAgente, envelopeDe } from "./agente/entrada";
+import { EntradaDoAgente, envelopeDe, idDaMensagem } from "./agente/entrada";
 import { MonitorDoAgente } from "./agente/monitor";
 import { BackendPulseClient } from "./backend-pulse";
 import { ConfigError, loadConfig } from "./config";
@@ -47,6 +47,7 @@ async function ligarOAgente(
     new StateStore(path.resolve(process.cwd(), ".runtime/agente-whatsapp.json")),
     config,
   );
+  const eventosRecentes = new Set<string>();
 
   const repassar = async (mensagem: Message): Promise<void> => {
     // O `message_create` também dispara para o que o próprio agente acabou de
@@ -93,6 +94,11 @@ async function ligarOAgente(
   // requisição repetida que o índice único do backend descarta — enquanto o
   // custo de ouvir só o errado é a mensagem sumir sem deixar rastro.
   const ouvir = (mensagem: Message): void => {
+    const waId = idDaMensagem(mensagem);
+    if (eventosRecentes.has(waId)) return;
+    eventosRecentes.add(waId);
+    setTimeout(() => eventosRecentes.delete(waId), 60_000).unref();
+
     void repassar(mensagem).catch((erro: unknown) => {
       console.error(`Falha ao ler a mensagem recebida: ${errorMessage(erro)}`);
     });

@@ -17,12 +17,21 @@ import { erroDaResposta } from "./http";
  */
 
 const TIMEOUT_MS = 20_000;
+const TIMEOUT_AUDIO_MS = 90_000;
+const MAX_AUDIO_BASE64 = 12_000_000;
+
+export type AudioRecebido = {
+  nome: string;
+  tipoMime: string;
+  conteudoBase64: string;
+};
 
 export type EnvelopeRecebido = {
   waId: string;
   /** Sempre **quem falou**. Num grupo, o autor — nunca o jid do grupo. */
   de: string;
-  texto: string;
+  texto: string | null;
+  audio: AudioRecebido | null;
   conversa: "direta" | "grupo";
   grupo: string | null;
   nomeNoWhatsapp: string | null;
@@ -66,8 +75,12 @@ export function idDaMensagem(mensagem: Message): string {
     return `${id?.fromMe ? "true" : "false"}_${remoto}_${bruto}`.slice(0, 120);
   }
 
+  const duracao = (mensagem as { duration?: unknown }).duration ?? 0;
   const digest = createHash("sha1")
-    .update(`${mensagem.from ?? ""}|${mensagem.author ?? ""}|${mensagem.timestamp ?? 0}|${mensagem.body ?? ""}`)
+    .update(
+      `${mensagem.from ?? ""}|${mensagem.author ?? ""}|${mensagem.timestamp ?? 0}|` +
+        `${mensagem.type ?? ""}|${duracao}|${mensagem.body ?? ""}`,
+    )
     .digest("hex");
   return `derivado_${digest}`;
 }
@@ -135,13 +148,51 @@ export function numeroDoJid(jid: string | null | undefined): string {
   return (jid ?? "").split("@")[0]?.replace(/\D/g, "") ?? "";
 }
 
+function extensaoDoAudio(tipoMime: string): string {
+  const extensoes: Record<string, string> = {
+    "audio/flac": "flac",
+    "audio/m4a": "m4a",
+    "audio/mp4": "mp4",
+    "audio/mpeg": "mp3",
+    "audio/ogg": "ogg",
+    "audio/opus": "ogg",
+    "audio/wav": "wav",
+    "audio/wave": "wav",
+    "audio/webm": "webm",
+    "audio/x-m4a": "m4a",
+    "audio/x-wav": "wav",
+  };
+  return extensoes[tipoMime] ?? "ogg";
+}
+
+async function audioDe(mensagem: Message): Promise<AudioRecebido | null> {
+  if (!mensagem.hasMedia || !["audio", "ptt"].includes(mensagem.type)) {
+    return null;
+  }
+  const media = await mensagem.downloadMedia();
+  const tipoMime = (media?.mimetype ?? "").split(";", 1)[0]?.trim().toLowerCase();
+  const conteudoBase64 = media?.data?.trim() ?? "";
+  if (!tipoMime?.startsWith("audio/") || !conteudoBase64) {
+    return null;
+  }
+  if (conteudoBase64.length > MAX_AUDIO_BASE64) {
+    throw new Error("O áudio recebido ultrapassa o limite de 8 MB.");
+  }
+  const nomeInformado = media.filename?.trim();
+  return {
+    nome: (nomeInformado || `audio-whatsapp.${extensaoDoAudio(tipoMime)}`).slice(0, 160),
+    tipoMime,
+    conteudoBase64,
+  };
+}
+
 /**
  * O envelope de uma mensagem do `whatsapp-web.js`, no formato do backend.
  *
  * Devolve `null` quando não há o que repassar — mensagem da própria conta (o
- * eco do que o agente acabou de mandar) ou sem texto. Áudio e imagem ficam para
- * depois: repassar um anexo vazio faria o backend responder a uma frase que
- * ninguém escreveu.
+ * eco do que o agente acabou de mandar) ou sem texto nem áudio. Imagens e
+ * documentos continuam fora: repassar um anexo vazio faria o backend responder
+ * a uma frase que ninguém escreveu.
  */
 export async function envelopeDe(
   mensagem: Message,
@@ -150,7 +201,8 @@ export async function envelopeDe(
   if (mensagem.fromMe) return null;
 
   const texto = (mensagem.body ?? "").trim();
-  if (!texto) return null;
+  const audio = await audioDe(mensagem);
+  if (!texto && !audio) return null;
 
   const conversaId = mensagem.from ?? "";
   const ehGrupo = conversaId.endsWith(SUFIXO_GRUPO);
@@ -168,7 +220,8 @@ export async function envelopeDe(
   return {
     waId: idDaMensagem(mensagem),
     de,
-    texto,
+    texto: audio ? null : texto,
+    audio,
     conversa: ehGrupo ? "grupo" : "direta",
     grupo: grupo && grupo.length >= 5 ? grupo : null,
     // O `whatsapp-web.js` entrega o nome do contato em tempo de execução, mas
@@ -206,12 +259,19 @@ export class EntradaDoAgente {
         wa_id: envelope.waId,
         de: envelope.de,
         texto: envelope.texto,
+        audio: envelope.audio
+          ? {
+              nome: envelope.audio.nome,
+              tipo_mime: envelope.audio.tipoMime,
+              conteudo_base64: envelope.audio.conteudoBase64,
+            }
+          : null,
         conversa: envelope.conversa,
         grupo: envelope.grupo,
         nome_no_whatsapp: envelope.nomeNoWhatsapp,
         enviada_em: envelope.enviadaEm,
       }),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(envelope.audio ? TIMEOUT_AUDIO_MS : TIMEOUT_MS),
     });
 
     if (!resposta.ok) {
