@@ -17,13 +17,23 @@ import { erroDaResposta } from "./http";
  */
 
 const TIMEOUT_MS = 20_000;
-const TIMEOUT_AUDIO_MS = 90_000;
+const TIMEOUT_MIDIA_MS = 90_000;
 const MAX_AUDIO_BASE64 = 12_000_000;
+const MAX_IMAGEM_BYTES = 10 * 1024 * 1024;
+const TENTATIVAS_DOWNLOAD_IMAGEM = 3;
+const ESPERA_DOWNLOAD_IMAGEM_MS = 600;
 
 export type AudioRecebido = {
   nome: string;
   tipoMime: string;
   conteudoBase64: string;
+};
+
+export type ImagemRecebida = {
+  nome: string;
+  tipoMime: "image/jpeg" | "image/png" | "image/webp";
+  conteudoBase64: string;
+  legenda: string | null;
 };
 
 export type EnvelopeRecebido = {
@@ -32,6 +42,7 @@ export type EnvelopeRecebido = {
   de: string;
   texto: string | null;
   audio: AudioRecebido | null;
+  imagem: ImagemRecebida | null;
   conversa: "direta" | "grupo";
   grupo: string | null;
   nomeNoWhatsapp: string | null;
@@ -186,13 +197,81 @@ async function audioDe(mensagem: Message): Promise<AudioRecebido | null> {
   };
 }
 
+const EXTENSAO_IMAGEM: Record<ImagemRecebida["tipoMime"], string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+async function baixarImagem(mensagem: Message) {
+  let ultimaFalha: unknown;
+  for (let tentativa = 1; tentativa <= TENTATIVAS_DOWNLOAD_IMAGEM; tentativa += 1) {
+    try {
+      const media = await mensagem.downloadMedia();
+      if (media) return media;
+      ultimaFalha = new Error("o WhatsApp devolveu a imagem vazia");
+    } catch (erro) {
+      ultimaFalha = erro;
+    }
+    if (tentativa < TENTATIVAS_DOWNLOAD_IMAGEM) {
+      await new Promise<void>((resolver) =>
+        setTimeout(resolver, ESPERA_DOWNLOAD_IMAGEM_MS),
+      );
+    }
+  }
+  const detalhe = ultimaFalha instanceof Error ? ultimaFalha.message : String(ultimaFalha);
+  throw new Error(
+    `Não foi possível baixar a imagem recebida após ${TENTATIVAS_DOWNLOAD_IMAGEM} tentativas: ${detalhe}`,
+  );
+}
+
+function base64Valido(conteudo: string): Buffer | null {
+  const limpo = conteudo.replace(/\s/g, "");
+  if (!limpo || !/^[A-Za-z0-9+/]*={0,2}$/.test(limpo) || limpo.length % 4 !== 0) {
+    return null;
+  }
+  const bytes = Buffer.from(limpo, "base64");
+  const normalizado = bytes.toString("base64").replace(/=+$/, "");
+  return normalizado === limpo.replace(/=+$/, "") ? bytes : null;
+}
+
+async function imagemDe(mensagem: Message, legenda: string): Promise<ImagemRecebida | null> {
+  if (!mensagem.hasMedia || mensagem.type !== "image") {
+    return null;
+  }
+  const media = await baixarImagem(mensagem);
+  const [tipoBruto = ""] = media.mimetype.split(";", 1);
+  const tipo = tipoBruto.trim().toLowerCase();
+  if (!["image/jpeg", "image/png", "image/webp"].includes(tipo)) {
+    throw new Error("O formato da imagem recebida não é suportado.");
+  }
+  const conteudoBase64 = media.data.trim();
+  const bytes = base64Valido(conteudoBase64);
+  if (!bytes) {
+    throw new Error("A imagem recebida está corrompida.");
+  }
+  if (bytes.length > MAX_IMAGEM_BYTES) {
+    throw new Error("A imagem recebida ultrapassa o limite de 10 MB.");
+  }
+  const tipoMime = tipo as ImagemRecebida["tipoMime"];
+  const nomeInformado = media.filename?.trim();
+  return {
+    nome: (
+      nomeInformado || `imagem-whatsapp.${EXTENSAO_IMAGEM[tipoMime]}`
+    ).slice(0, 160),
+    tipoMime,
+    conteudoBase64,
+    legenda: legenda || null,
+  };
+}
+
 /**
  * O envelope de uma mensagem do `whatsapp-web.js`, no formato do backend.
  *
  * Devolve `null` quando não há o que repassar — mensagem da própria conta (o
- * eco do que o agente acabou de mandar) ou sem texto nem áudio. Imagens e
- * documentos continuam fora: repassar um anexo vazio faria o backend responder
- * a uma frase que ninguém escreveu.
+ * eco do que o agente acabou de mandar) ou sem texto, áudio nem imagem.
+ * Documentos continuam fora. A ponte relata a imagem e a legenda; não decide
+ * se ela é pendência, ocorrência, recibo ou documento.
  */
 export async function envelopeDe(
   mensagem: Message,
@@ -202,7 +281,8 @@ export async function envelopeDe(
 
   const texto = (mensagem.body ?? "").trim();
   const audio = await audioDe(mensagem);
-  if (!texto && !audio) return null;
+  const imagem = await imagemDe(mensagem, texto);
+  if (!texto && !audio && !imagem) return null;
 
   const conversaId = mensagem.from ?? "";
   const ehGrupo = conversaId.endsWith(SUFIXO_GRUPO);
@@ -220,8 +300,9 @@ export async function envelopeDe(
   return {
     waId: idDaMensagem(mensagem),
     de,
-    texto: audio ? null : texto,
+    texto: audio || imagem ? null : texto,
     audio,
+    imagem,
     conversa: ehGrupo ? "grupo" : "direta",
     grupo: grupo && grupo.length >= 5 ? grupo : null,
     // O `whatsapp-web.js` entrega o nome do contato em tempo de execução, mas
@@ -266,12 +347,22 @@ export class EntradaDoAgente {
               conteudo_base64: envelope.audio.conteudoBase64,
             }
           : null,
+        imagem: envelope.imagem
+          ? {
+              nome: envelope.imagem.nome,
+              tipo_mime: envelope.imagem.tipoMime,
+              conteudo_base64: envelope.imagem.conteudoBase64,
+              legenda: envelope.imagem.legenda,
+            }
+          : null,
         conversa: envelope.conversa,
         grupo: envelope.grupo,
         nome_no_whatsapp: envelope.nomeNoWhatsapp,
         enviada_em: envelope.enviadaEm,
       }),
-      signal: AbortSignal.timeout(envelope.audio ? TIMEOUT_AUDIO_MS : TIMEOUT_MS),
+      signal: AbortSignal.timeout(
+        envelope.audio || envelope.imagem ? TIMEOUT_MIDIA_MS : TIMEOUT_MS,
+      ),
     });
 
     if (!resposta.ok) {

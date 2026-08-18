@@ -76,7 +76,7 @@ test("áudio do WhatsApp vira envelope para transcrição no backend", async () 
   });
 });
 
-test("imagem sem legenda continua fora do canal de conversa", async () => {
+test("imagem sem legenda vira envelope neutro para o backend", async () => {
   const envelope = await envelopeDe(
     mensagem({
       body: "",
@@ -86,7 +86,69 @@ test("imagem sem legenda continua fora do canal de conversa", async () => {
     } as unknown as Partial<Message>),
   );
 
-  assert.equal(envelope, null);
+  assert.equal(envelope?.texto, null);
+  assert.equal(envelope?.audio, null);
+  assert.deepEqual(envelope?.imagem, {
+    nome: "imagem-whatsapp.jpg",
+    tipoMime: "image/jpeg",
+    conteudoBase64: "aW1hZ2Vt",
+    legenda: null,
+  });
+});
+
+test("imagem preserva a legenda sem interpretar o produto", async () => {
+  const envelope = await envelopeDe(
+    mensagem({
+      body: "olha a pia",
+      type: "image",
+      hasMedia: true,
+      downloadMedia: async () => ({
+        data: "aW1hZ2Vt",
+        mimetype: "image/webp",
+        filename: "pia.webp",
+      }),
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(envelope?.imagem?.legenda, "olha a pia");
+  assert.equal(envelope?.imagem?.tipoMime, "image/webp");
+  assert.equal(envelope?.texto, null);
+});
+
+test("imagem é baixada de novo quando o WhatsApp ainda não liberou a mídia", async () => {
+  let tentativas = 0;
+  const envelope = await envelopeDe(
+    mensagem({
+      body: "",
+      type: "image",
+      hasMedia: true,
+      downloadMedia: async () => {
+        tentativas += 1;
+        if (tentativas === 1) throw "r";
+        return { data: "aW1hZ2Vt", mimetype: "image/jpeg" };
+      },
+    } as unknown as Partial<Message>),
+  );
+
+  assert.equal(tentativas, 2);
+  assert.equal(envelope?.imagem?.conteudoBase64, "aW1hZ2Vt");
+});
+
+test("formato de imagem fora da lista é recusado", async () => {
+  await assert.rejects(
+    envelopeDe(
+      mensagem({
+        body: "",
+        type: "image",
+        hasMedia: true,
+        downloadMedia: async () => ({
+          data: "aW1hZ2Vt",
+          mimetype: "image/gif",
+        }),
+      } as unknown as Partial<Message>),
+    ),
+    /formato da imagem/,
+  );
 });
 
 test("remetente sem número reconhecível é descartado", async () => {
