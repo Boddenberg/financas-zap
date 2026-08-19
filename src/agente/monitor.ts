@@ -1,9 +1,14 @@
+import { createHash } from "node:crypto";
 import { Client, MessageMedia } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
 import { advanceCursor, isAfterCursor, StateStore } from "../state-store";
 import type { AnexoDaCaixa, CaixaDoAgente, MensagemDaCaixa } from "./caixa";
 import type { EntradaDoAgente } from "./entrada";
+
+function destinoParaLog(jid: string): string {
+  return createHash("sha256").update(jid).digest("hex").slice(0, 16);
+}
 
 /**
  * O laço do canal de conversa: pulso, leitura, entrega, confirmação, cursor.
@@ -117,7 +122,7 @@ export class MonitorDoAgente {
       await this.despachar(mensagem);
       await this.caixa.confirmar(mensagem.id, true);
       console.log(
-        `Resposta ${mensagem.id} entregue em ${mensagem.jid}` +
+        `Resposta ${mensagem.id} entregue em destino_hash=${destinoParaLog(mensagem.jid)}` +
           `${mensagem.anexos.length ? ` com ${mensagem.anexos.length} anexo(s)` : ""}.`,
       );
       return true;

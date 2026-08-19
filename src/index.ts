@@ -88,8 +88,10 @@ async function ligarOAgente(
           : recibo.aceita
             ? "aceita"
             : `ignorada pelo Finanças${recibo.motivo ? ` (${recibo.motivo})` : ""}`;
+        const conversaHash = conversaParaLog(envelope.grupo ?? envelope.de);
+        const tipo = envelope.imagem ? "imagem" : envelope.audio ? "audio" : "texto";
         console.log(
-          `Mensagem de ${envelope.de}${envelope.grupo ? ` no grupo ${envelope.grupo}` : ""}: ${desfecho}.`,
+          `whatsapp_entrada conversa_hash=${conversaHash} tipo=${tipo} resultado=${desfecho}`,
         );
         if (recibo.aceita && !recibo.duplicada) {
           monitor.aguardarResposta();
@@ -141,13 +143,14 @@ async function ligarOAgente(
 function connectedAccountDescription(client: Client): string {
   const accountId = client.info?.wid?._serialized;
   const pushName = client.info?.pushname?.trim();
+  const final = accountId?.replace("@c.us", "").slice(-4);
 
-  if (pushName && accountId) {
-    return `${pushName} (${accountId.replace("@c.us", "")})`;
+  if (pushName && final) {
+    return `${pushName} (final ${final})`;
   }
 
-  if (accountId) {
-    return accountId.replace("@c.us", "");
+  if (final) {
+    return `conta final ${final}`;
   }
 
   return "informação não disponível";
