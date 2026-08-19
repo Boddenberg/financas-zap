@@ -40,7 +40,7 @@ async function ligarOAgente(
   client: Client,
   config: import("./config").AppConfig,
   sinal: AbortSignal,
-): Promise<Promise<void>> {
+): Promise<void> {
   const caixa = new CaixaDoAgente(config);
   const entrada = new EntradaDoAgente(config);
   await caixa.conectar();
@@ -316,7 +316,7 @@ async function main(): Promise<void> {
     // O canal de conversa é o segundo laço, e ele é opcional: sem
     // AGENTE_PONTE_CHAVE a ponte roda só os avisos da Casa, como sempre rodou.
     const agente = config.agenteChave
-      ? await ligarOAgente(client, config, abortController.signal)
+      ? ligarOAgente(client, config, abortController.signal)
       : null;
     if (!agente) {
       console.log(
