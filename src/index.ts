@@ -5,9 +5,12 @@ import { CaixaDoAgente } from "./agente/caixa";
 import {
   EntradaDoAgente,
   FalhaAoBaixarImagemWhatsapp,
+  FalhasRecentesImagem,
   avisarImagemIndisponivel,
+  conversaParaLog,
   envelopeDe,
   idDaMensagem,
+  idDaMensagemParaLog,
 } from "./agente/entrada";
 import { MonitorDoAgente } from "./agente/monitor";
 import { BackendPulseClient } from "./backend-pulse";
@@ -54,6 +57,7 @@ async function ligarOAgente(
     config,
   );
   const eventosRecentes = new Set<string>();
+  const falhasDeImagem = new FalhasRecentesImagem();
 
   const repassar = async (mensagem: Message): Promise<void> => {
     // O `message_create` também dispara para o que o próprio agente acabou de
@@ -71,6 +75,9 @@ async function ligarOAgente(
         `Mensagem ignorada pela ponte (${mensagem.author ?? mensagem.from ?? "origem desconhecida"}): própria conta, sem texto ou remetente irreconhecível.`,
       );
       return;
+    }
+    if (envelope.imagem) {
+      falhasDeImagem.limpar(mensagem.from ?? "");
     }
 
     void entrada
@@ -108,9 +115,13 @@ async function ligarOAgente(
     void repassar(mensagem).catch(async (erro: unknown) => {
       console.error(`Falha ao ler a mensagem recebida: ${errorMessage(erro)}`);
       if (erro instanceof FalhaAoBaixarImagemWhatsapp) {
+        const chaveDaConversa = mensagem.from ?? "origem-desconhecida";
+        const quantidade = falhasDeImagem.registrar(chaveDaConversa);
         try {
-          await avisarImagemIndisponivel(client, mensagem);
-          console.log("O remetente foi avisado de que precisa reenviar a imagem.");
+          await avisarImagemIndisponivel(client, mensagem, quantidade >= 2);
+          console.log(
+            `whatsapp_media_falha_repetida message_id=${idDaMensagemParaLog(mensagem)} conversa_hash=${conversaParaLog(chaveDaConversa)} quantidade=${quantidade}`,
+          );
         } catch (falha: unknown) {
           console.error(
             `Falha ao avisar que a imagem não pôde ser baixada: ${errorMessage(falha)}`,

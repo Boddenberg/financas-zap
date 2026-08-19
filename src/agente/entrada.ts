@@ -23,8 +23,12 @@ const MAX_IMAGEM_BYTES = 10 * 1024 * 1024;
 const ESPERAS_DOWNLOAD_IMAGEM_MS = [600, 1_200, 2_500, 5_000, 8_000, 12_000, 15_000];
 const TENTATIVAS_DOWNLOAD_IMAGEM = ESPERAS_DOWNLOAD_IMAGEM_MS.length + 1;
 const AVISO_IMAGEM_INDISPONIVEL =
-  "Recebi a foto, mas o WhatsApp não liberou o arquivo para mim. " +
-  "Reenvie a imagem, por favor — o compromisso continua em contexto.";
+  "Não consegui abrir essa foto agora. Tenta reenviar uma vez? " +
+  "O compromisso continua aqui.";
+const AVISO_IMAGEM_REPETIDAMENTE_INDISPONIVEL =
+  "Essa foto continua sem abrir aqui. Não precisa reenviar de novo agora — " +
+  "tente outra imagem ou mais tarde.";
+const JANELA_FALHAS_IMAGEM_MS = 15 * 60 * 1_000;
 
 type ClienteDaEntrada = Partial<
   Pick<Client, "getContactLidAndPhone" | "getMessageById" | "sendMessage">
@@ -41,6 +45,24 @@ export class FalhaAoBaixarImagemWhatsapp extends Error {
       `Não foi possível baixar a imagem recebida após ${TENTATIVAS_DOWNLOAD_IMAGEM} tentativas: ${detalhe}`,
     );
     this.name = "FalhaAoBaixarImagemWhatsapp";
+  }
+}
+
+export class FalhasRecentesImagem {
+  private readonly falhas = new Map<string, { quantidade: number; ultimaEm: number }>();
+
+  registrar(chave: string, agora = Date.now()): number {
+    const anterior = this.falhas.get(chave);
+    const quantidade =
+      anterior && agora - anterior.ultimaEm <= JANELA_FALHAS_IMAGEM_MS
+        ? anterior.quantidade + 1
+        : 1;
+    this.falhas.set(chave, { quantidade, ultimaEm: agora });
+    return quantidade;
+  }
+
+  limpar(chave: string): void {
+    this.falhas.delete(chave);
   }
 }
 
@@ -95,16 +117,30 @@ const SUFIXO_LID = "@lid";
  */
 export function idDaMensagem(mensagem: Message): string {
   const id = mensagem.id as
-    | { _serialized?: unknown; id?: unknown; remote?: unknown; fromMe?: unknown }
+    | {
+        _serialized?: unknown;
+        $1?: unknown;
+        id?: unknown;
+        remote?: unknown;
+        fromMe?: unknown;
+      }
     | undefined;
 
-  const serializado = typeof id?._serialized === "string" ? id._serialized.trim() : "";
-  if (serializado) return serializado.slice(0, 120);
+  const serializado =
+    (typeof id?._serialized === "string" && id._serialized.trim()) ||
+    (typeof id?.$1 === "string" && id.$1.trim()) ||
+    "";
+  if (serializado) {
+    normalizarIdParaBiblioteca(id, serializado);
+    return serializado.slice(0, 120);
+  }
 
   const bruto = typeof id?.id === "string" ? id.id.trim() : "";
   if (bruto) {
     const remoto = typeof id?.remote === "string" ? id.remote : String(id?.remote ?? "");
-    return `${id?.fromMe ? "true" : "false"}_${remoto}_${bruto}`.slice(0, 120);
+    const reconstruido = `${id?.fromMe ? "true" : "false"}_${remoto}_${bruto}`;
+    normalizarIdParaBiblioteca(id, reconstruido);
+    return reconstruido.slice(0, 120);
   }
 
   const duracao = (mensagem as { duration?: unknown }).duration ?? 0;
@@ -115,6 +151,44 @@ export function idDaMensagem(mensagem: Message): string {
     )
     .digest("hex");
   return `derivado_${digest}`;
+}
+
+export function idDaMensagemParaLog(mensagem: Message): string {
+  const bruto = (mensagem.id as { id?: unknown } | undefined)?.id;
+  if (typeof bruto === "string" && bruto.trim()) return bruto.trim().slice(0, 80);
+  return createHash("sha256").update(idDaMensagem(mensagem)).digest("hex").slice(0, 16);
+}
+
+export function conversaParaLog(conversa: string): string {
+  return createHash("sha256").update(conversa).digest("hex").slice(0, 16);
+}
+
+function normalizarIdParaBiblioteca(
+  id:
+    | { _serialized?: unknown; id?: unknown; remote?: unknown; fromMe?: unknown }
+    | undefined,
+  serializado: string,
+): void {
+  if (!id || (typeof id._serialized === "string" && id._serialized)) return;
+  // Em julho de 2026 o WhatsApp Web renomeou este campo para `$1`. A versão
+  // atual do whatsapp-web.js ainda consulta `_serialized` em downloadMedia();
+  // recolocá-lo no objeto preserva a API da biblioteca sem mexer em node_modules.
+  try {
+    Object.defineProperty(id, "_serialized", {
+      value: serializado,
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+  } catch {
+    // Um id congelado continua tendo o valor devolvido para a idempotência; o
+    // download registrará a falha exata em vez de esconder este caso.
+  }
+}
+
+function detalheDoErro(erro: unknown): string {
+  if (erro instanceof Error) return `${erro.name}: ${erro.message}`;
+  return String(erro);
 }
 
 function nomeDe(mensagem: Message): string | null {
@@ -231,15 +305,26 @@ async function baixarImagem(
 ) {
   let ultimaFalha: unknown;
   let mensagemAtual = mensagem;
+  const waId = idDaMensagem(mensagem);
+  const messageIdLog = idDaMensagemParaLog(mensagem);
 
   for (let tentativa = 1; tentativa <= TENTATIVAS_DOWNLOAD_IMAGEM; tentativa += 1) {
     try {
+      idDaMensagem(mensagemAtual);
       const media = await mensagemAtual.downloadMedia();
-      if (media) return media;
+      if (media) {
+        console.log(
+          `whatsapp_media_download message_id=${messageIdLog} tentativa=${tentativa} resultado=sucesso mime=${media.mimetype} base64_chars=${media.data?.length ?? 0}`,
+        );
+        return media;
+      }
       ultimaFalha = new Error("o WhatsApp devolveu a imagem vazia");
     } catch (erro) {
       ultimaFalha = erro;
     }
+    console.warn(
+      `whatsapp_media_download message_id=${messageIdLog} tentativa=${tentativa} resultado=falha etapa=downloadMedia erro=${detalheDoErro(ultimaFalha)}`,
+    );
 
     if (tentativa < TENTATIVAS_DOWNLOAD_IMAGEM) {
       await aguardar(ESPERAS_DOWNLOAD_IMAGEM_MS[tentativa - 1] ?? 15_000);
@@ -247,7 +332,6 @@ async function baixarImagem(
       // O objeto emitido pelo evento pode continuar apontando para o estágio
       // inicial da mídia. Reabrir a mensagem pelo id traz o modelo que o
       // WhatsApp Web atualizou enquanto esperávamos.
-      const waId = mensagem.id?._serialized;
       if (waId && client?.getMessageById) {
         try {
           mensagemAtual = await client.getMessageById(waId);
@@ -258,7 +342,7 @@ async function baixarImagem(
       }
     }
   }
-  const detalhe = ultimaFalha instanceof Error ? ultimaFalha.message : String(ultimaFalha);
+  const detalhe = detalheDoErro(ultimaFalha);
   throw new FalhaAoBaixarImagemWhatsapp(detalhe);
 }
 
@@ -321,6 +405,8 @@ export async function envelopeDe(
   aguardar: Esperar = esperar,
 ): Promise<EnvelopeRecebido | null> {
   if (mensagem.fromMe) return null;
+  // Corrige o identificador antes de áudio ou imagem chamarem downloadMedia().
+  const waId = idDaMensagem(mensagem);
 
   const texto = (mensagem.body ?? "").trim();
   const audio = await audioDe(mensagem);
@@ -341,7 +427,7 @@ export async function envelopeDe(
   const grupo = ehGrupo ? numeroDoJid(conversaId) : null;
 
   return {
-    waId: idDaMensagem(mensagem),
+    waId,
     de,
     texto: audio || imagem ? null : texto,
     audio,
@@ -367,14 +453,21 @@ export async function envelopeDe(
 export async function avisarImagemIndisponivel(
   client: ClienteDaEntrada,
   mensagem: Message,
+  repetida = false,
 ): Promise<void> {
   const destino = mensagem.from?.trim();
   if (!destino || !client.sendMessage) {
     throw new Error("Não foi possível identificar onde avisar sobre a foto.");
   }
-  await client.sendMessage(destino, AVISO_IMAGEM_INDISPONIVEL, {
-    waitUntilMsgSent: true,
-  });
+  await client.sendMessage(
+    destino,
+    repetida
+      ? AVISO_IMAGEM_REPETIDAMENTE_INDISPONIVEL
+      : AVISO_IMAGEM_INDISPONIVEL,
+    {
+      waitUntilMsgSent: true,
+    },
+  );
 }
 
 export class EntradaDoAgente {

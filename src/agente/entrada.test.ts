@@ -3,6 +3,7 @@ import test from "node:test";
 import type { Message } from "whatsapp-web.js";
 import {
   FalhaAoBaixarImagemWhatsapp,
+  FalhasRecentesImagem,
   avisarImagemIndisponivel,
   envelopeDe,
   numeroDoJid,
@@ -173,6 +174,33 @@ test("a mensagem é reaberta enquanto o WhatsApp prepara a imagem", async () => 
   assert.equal(envelope?.imagem?.conteudoBase64, "aW1hZ2Vt");
 });
 
+test("o campo `$1` é normalizado antes de downloadMedia", async () => {
+  const id = {
+    fromMe: false,
+    remote: "5511981090986@lid",
+    id: "3A97F034BBAW753D524F",
+    $1: "false_5511981090986@lid_3A97F034BBAW753D524F",
+  } as { _serialized?: string } & Record<string, unknown>;
+  const recebida = mensagem({
+    id,
+    body: "capa do dentista amanhã 14h",
+    type: "image",
+    hasMedia: true,
+    downloadMedia: async () => {
+      if (!id._serialized) throw "r";
+      return { data: "aW1hZ2Vt", mimetype: "image/jpeg" };
+    },
+  } as unknown as Partial<Message>);
+
+  const envelope = await envelopeDe(recebida);
+
+  assert.equal(
+    id._serialized,
+    "false_5511981090986@lid_3A97F034BBAW753D524F",
+  );
+  assert.equal(envelope?.imagem?.conteudoBase64, "aW1hZ2Vt");
+});
+
 test("a falha persistente de download tem tipo próprio", async () => {
   let tentativas = 0;
   await assert.rejects(
@@ -211,10 +239,28 @@ test("a falha persistente recebe resposta em vez de silêncio", async () => {
     {
       destino: "5511981090986@c.us",
       texto:
-        "Recebi a foto, mas o WhatsApp não liberou o arquivo para mim. " +
-        "Reenvie a imagem, por favor — o compromisso continua em contexto.",
+        "Não consegui abrir essa foto agora. Tenta reenviar uma vez? " +
+        "O compromisso continua aqui.",
     },
   ]);
+});
+
+test("a segunda falha interrompe o ciclo de reenvio", async () => {
+  const enviadas: string[] = [];
+  const client = {
+    async sendMessage(_destino: string, texto: unknown) {
+      enviadas.push(String(texto));
+      return mensagem({ fromMe: true });
+    },
+  };
+  const falhas = new FalhasRecentesImagem();
+  const chave = "5511981090986@c.us";
+
+  await avisarImagemIndisponivel(client, mensagem({ from: chave }), falhas.registrar(chave) >= 2);
+  await avisarImagemIndisponivel(client, mensagem({ from: chave }), falhas.registrar(chave) >= 2);
+
+  assert.match(enviadas[0] ?? "", /Tenta reenviar uma vez/);
+  assert.match(enviadas[1] ?? "", /Não precisa reenviar de novo/);
 });
 
 test("formato de imagem fora da lista é recusado", async () => {
