@@ -2,7 +2,13 @@ import path from "node:path";
 import qrcode from "qrcode-terminal";
 import type { Client, Message } from "whatsapp-web.js";
 import { CaixaDoAgente } from "./agente/caixa";
-import { EntradaDoAgente, envelopeDe, idDaMensagem } from "./agente/entrada";
+import {
+  EntradaDoAgente,
+  FalhaAoBaixarImagemWhatsapp,
+  avisarImagemIndisponivel,
+  envelopeDe,
+  idDaMensagem,
+} from "./agente/entrada";
 import { MonitorDoAgente } from "./agente/monitor";
 import { BackendPulseClient } from "./backend-pulse";
 import { ConfigError, loadConfig } from "./config";
@@ -99,8 +105,18 @@ async function ligarOAgente(
     eventosRecentes.add(waId);
     setTimeout(() => eventosRecentes.delete(waId), 60_000).unref();
 
-    void repassar(mensagem).catch((erro: unknown) => {
+    void repassar(mensagem).catch(async (erro: unknown) => {
       console.error(`Falha ao ler a mensagem recebida: ${errorMessage(erro)}`);
+      if (erro instanceof FalhaAoBaixarImagemWhatsapp) {
+        try {
+          await avisarImagemIndisponivel(client, mensagem);
+          console.log("O remetente foi avisado de que precisa reenviar a imagem.");
+        } catch (falha: unknown) {
+          console.error(
+            `Falha ao avisar que a imagem não pôde ser baixada: ${errorMessage(falha)}`,
+          );
+        }
+      }
     });
   };
 

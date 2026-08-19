@@ -20,8 +20,29 @@ const TIMEOUT_MS = 20_000;
 const TIMEOUT_MIDIA_MS = 90_000;
 const MAX_AUDIO_BASE64 = 12_000_000;
 const MAX_IMAGEM_BYTES = 10 * 1024 * 1024;
-const TENTATIVAS_DOWNLOAD_IMAGEM = 3;
-const ESPERA_DOWNLOAD_IMAGEM_MS = 600;
+const ESPERAS_DOWNLOAD_IMAGEM_MS = [600, 1_200, 2_500, 5_000, 8_000, 12_000, 15_000];
+const TENTATIVAS_DOWNLOAD_IMAGEM = ESPERAS_DOWNLOAD_IMAGEM_MS.length + 1;
+const AVISO_IMAGEM_INDISPONIVEL =
+  "Recebi a foto, mas o WhatsApp não liberou o arquivo para mim. " +
+  "Reenvie a imagem, por favor — o compromisso continua em contexto.";
+
+type ClienteDaEntrada = Partial<
+  Pick<Client, "getContactLidAndPhone" | "getMessageById" | "sendMessage">
+>;
+type Esperar = (milissegundos: number) => Promise<void>;
+
+const esperar: Esperar = async (milissegundos) => {
+  await new Promise<void>((resolver) => setTimeout(resolver, milissegundos));
+};
+
+export class FalhaAoBaixarImagemWhatsapp extends Error {
+  constructor(detalhe: string) {
+    super(
+      `Não foi possível baixar a imagem recebida após ${TENTATIVAS_DOWNLOAD_IMAGEM} tentativas: ${detalhe}`,
+    );
+    this.name = "FalhaAoBaixarImagemWhatsapp";
+  }
+}
 
 export type AudioRecebido = {
   nome: string;
@@ -116,7 +137,7 @@ function nomeDe(mensagem: Message): string | null {
 export async function numeroDeQuemFalou(
   mensagem: Message,
   jid: string | null | undefined,
-  client?: Pick<Client, "getContactLidAndPhone">,
+  client?: Partial<Pick<Client, "getContactLidAndPhone">>,
 ): Promise<string> {
   if (!jid?.endsWith(SUFIXO_LID)) {
     return numeroDoJid(jid);
@@ -125,7 +146,7 @@ export async function numeroDeQuemFalou(
   // O caminho oficial: a própria biblioteca traduz LID em telefone. O contato
   // não serve para isto — numa conta que só se apresenta por LID, o `number`
   // dele vem vazio e o `id.user` devolve o mesmo LID de volta.
-  if (client) {
+  if (client?.getContactLidAndPhone) {
     try {
       const pares = await client.getContactLidAndPhone([jid]);
       const telefone = pares?.[0]?.pn;
@@ -203,26 +224,42 @@ const EXTENSAO_IMAGEM: Record<ImagemRecebida["tipoMime"], string> = {
   "image/webp": "webp",
 };
 
-async function baixarImagem(mensagem: Message) {
+async function baixarImagem(
+  mensagem: Message,
+  client: ClienteDaEntrada | undefined,
+  aguardar: Esperar,
+) {
   let ultimaFalha: unknown;
+  let mensagemAtual = mensagem;
+
   for (let tentativa = 1; tentativa <= TENTATIVAS_DOWNLOAD_IMAGEM; tentativa += 1) {
     try {
-      const media = await mensagem.downloadMedia();
+      const media = await mensagemAtual.downloadMedia();
       if (media) return media;
       ultimaFalha = new Error("o WhatsApp devolveu a imagem vazia");
     } catch (erro) {
       ultimaFalha = erro;
     }
+
     if (tentativa < TENTATIVAS_DOWNLOAD_IMAGEM) {
-      await new Promise<void>((resolver) =>
-        setTimeout(resolver, ESPERA_DOWNLOAD_IMAGEM_MS),
-      );
+      await aguardar(ESPERAS_DOWNLOAD_IMAGEM_MS[tentativa - 1] ?? 15_000);
+
+      // O objeto emitido pelo evento pode continuar apontando para o estágio
+      // inicial da mídia. Reabrir a mensagem pelo id traz o modelo que o
+      // WhatsApp Web atualizou enquanto esperávamos.
+      const waId = mensagem.id?._serialized;
+      if (waId && client?.getMessageById) {
+        try {
+          mensagemAtual = await client.getMessageById(waId);
+        } catch {
+          // A consulta é uma ajuda, não uma nova condição: a mensagem original
+          // ainda pode conseguir baixar na tentativa seguinte.
+        }
+      }
     }
   }
   const detalhe = ultimaFalha instanceof Error ? ultimaFalha.message : String(ultimaFalha);
-  throw new Error(
-    `Não foi possível baixar a imagem recebida após ${TENTATIVAS_DOWNLOAD_IMAGEM} tentativas: ${detalhe}`,
-  );
+  throw new FalhaAoBaixarImagemWhatsapp(detalhe);
 }
 
 function base64Valido(conteudo: string): Buffer | null {
@@ -235,11 +272,16 @@ function base64Valido(conteudo: string): Buffer | null {
   return normalizado === limpo.replace(/=+$/, "") ? bytes : null;
 }
 
-async function imagemDe(mensagem: Message, legenda: string): Promise<ImagemRecebida | null> {
+async function imagemDe(
+  mensagem: Message,
+  legenda: string,
+  client: ClienteDaEntrada | undefined,
+  aguardar: Esperar,
+): Promise<ImagemRecebida | null> {
   if (!mensagem.hasMedia || mensagem.type !== "image") {
     return null;
   }
-  const media = await baixarImagem(mensagem);
+  const media = await baixarImagem(mensagem, client, aguardar);
   const [tipoBruto = ""] = media.mimetype.split(";", 1);
   const tipo = tipoBruto.trim().toLowerCase();
   if (!["image/jpeg", "image/png", "image/webp"].includes(tipo)) {
@@ -275,13 +317,14 @@ async function imagemDe(mensagem: Message, legenda: string): Promise<ImagemReceb
  */
 export async function envelopeDe(
   mensagem: Message,
-  client?: Pick<Client, "getContactLidAndPhone">,
+  client?: ClienteDaEntrada,
+  aguardar: Esperar = esperar,
 ): Promise<EnvelopeRecebido | null> {
   if (mensagem.fromMe) return null;
 
   const texto = (mensagem.body ?? "").trim();
   const audio = await audioDe(mensagem);
-  const imagem = await imagemDe(mensagem, texto);
+  const imagem = await imagemDe(mensagem, texto, client, aguardar);
   if (!texto && !audio && !imagem) return null;
 
   const conversaId = mensagem.from ?? "";
@@ -312,6 +355,26 @@ export async function envelopeDe(
       ? new Date(mensagem.timestamp * 1000).toISOString()
       : null,
   };
+}
+
+/**
+ * Dá um desfecho visível quando nem a espera longa recuperou os bytes.
+ *
+ * Esta frase pertence ao transporte: não tenta interpretar a foto nem altera
+ * o assunto salvo no backend. Assim, o reenvio seguinte ainda encontra o
+ * compromisso que estava aguardando a capa.
+ */
+export async function avisarImagemIndisponivel(
+  client: ClienteDaEntrada,
+  mensagem: Message,
+): Promise<void> {
+  const destino = mensagem.from?.trim();
+  if (!destino || !client.sendMessage) {
+    throw new Error("Não foi possível identificar onde avisar sobre a foto.");
+  }
+  await client.sendMessage(destino, AVISO_IMAGEM_INDISPONIVEL, {
+    waitUntilMsgSent: true,
+  });
 }
 
 export class EntradaDoAgente {

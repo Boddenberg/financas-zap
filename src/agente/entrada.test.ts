@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Message } from "whatsapp-web.js";
-import { envelopeDe, numeroDoJid } from "./entrada";
+import {
+  FalhaAoBaixarImagemWhatsapp,
+  avisarImagemIndisponivel,
+  envelopeDe,
+  numeroDoJid,
+} from "./entrada";
 
 /**
  * O que estes testes seguram é a regra que mantém a ponte burra: ela **relata**
@@ -128,10 +133,88 @@ test("imagem é baixada de novo quando o WhatsApp ainda não liberou a mídia", 
         return { data: "aW1hZ2Vt", mimetype: "image/jpeg" };
       },
     } as unknown as Partial<Message>),
+    undefined,
+    async () => undefined,
   );
 
   assert.equal(tentativas, 2);
   assert.equal(envelope?.imagem?.conteudoBase64, "aW1hZ2Vt");
+});
+
+test("a mensagem é reaberta enquanto o WhatsApp prepara a imagem", async () => {
+  let consultas = 0;
+  const original = mensagem({
+    body: "",
+    type: "image",
+    hasMedia: true,
+    downloadMedia: async () => {
+      throw new Error("mídia ainda preparando");
+    },
+  } as unknown as Partial<Message>);
+  const atualizada = mensagem({
+    body: "",
+    type: "image",
+    hasMedia: true,
+    downloadMedia: async () => ({ data: "aW1hZ2Vt", mimetype: "image/jpeg" }),
+  } as unknown as Partial<Message>);
+
+  const envelope = await envelopeDe(
+    original,
+    {
+      async getMessageById() {
+        consultas += 1;
+        return atualizada;
+      },
+    },
+    async () => undefined,
+  );
+
+  assert.equal(consultas, 1);
+  assert.equal(envelope?.imagem?.conteudoBase64, "aW1hZ2Vt");
+});
+
+test("a falha persistente de download tem tipo próprio", async () => {
+  let tentativas = 0;
+  await assert.rejects(
+    envelopeDe(
+      mensagem({
+        body: "",
+        type: "image",
+        hasMedia: true,
+        downloadMedia: async () => {
+          tentativas += 1;
+          throw "r";
+        },
+      } as unknown as Partial<Message>),
+      undefined,
+      async () => undefined,
+    ),
+    FalhaAoBaixarImagemWhatsapp,
+  );
+
+  assert.equal(tentativas, 8);
+});
+
+test("a falha persistente recebe resposta em vez de silêncio", async () => {
+  const enviadas: Array<{ destino: string; texto: string }> = [];
+  await avisarImagemIndisponivel(
+    {
+      async sendMessage(destino, texto) {
+        enviadas.push({ destino, texto: String(texto) });
+        return mensagem({ fromMe: true });
+      },
+    },
+    mensagem({ from: "5511981090986@c.us" }),
+  );
+
+  assert.deepEqual(enviadas, [
+    {
+      destino: "5511981090986@c.us",
+      texto:
+        "Recebi a foto, mas o WhatsApp não liberou o arquivo para mim. " +
+        "Reenvie a imagem, por favor — o compromisso continua em contexto.",
+    },
+  ]);
 });
 
 test("formato de imagem fora da lista é recusado", async () => {
