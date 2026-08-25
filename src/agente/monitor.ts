@@ -120,12 +120,6 @@ export class MonitorDoAgente {
   private async enviar(mensagem: MensagemDaCaixa): Promise<boolean> {
     try {
       await this.despachar(mensagem);
-      await this.caixa.confirmar(mensagem.id, true);
-      console.log(
-        `Resposta ${mensagem.id} entregue em destino_hash=${destinoParaLog(mensagem.jid)}` +
-          `${mensagem.anexos.length ? ` com ${mensagem.anexos.length} anexo(s)` : ""}.`,
-      );
-      return true;
     } catch (erro) {
       const motivo = texto(erro);
       console.error(`Falha ao entregar a resposta ${mensagem.id}: ${motivo}`);
@@ -136,6 +130,22 @@ export class MonitorDoAgente {
       }
       return false;
     }
+
+    // Depois que o WhatsApp aceitou, uma falha do Supabase não autoriza um
+    // segundo envio. O cursor local avança e a confirmação fica como falha de
+    // observabilidade; reenviar criaria duas notificações iguais no celular.
+    try {
+      await this.caixa.confirmar(mensagem.id, true);
+    } catch (erro) {
+      console.error(
+        `Resposta ${mensagem.id} entregue, mas não confirmada no Finanças: ${texto(erro)}`,
+      );
+    }
+    console.log(
+      `Resposta ${mensagem.id} entregue em destino_hash=${destinoParaLog(mensagem.jid)}` +
+        `${mensagem.anexos.length ? ` com ${mensagem.anexos.length} anexo(s)` : ""}.`,
+    );
+    return true;
   }
 
   /**

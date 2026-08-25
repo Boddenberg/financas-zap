@@ -192,6 +192,37 @@ test("o cursor não passa por cima de uma resposta que não foi entregue", async
   });
 });
 
+test("falhar ao confirmar não reenvia o que o WhatsApp já aceitou", async () => {
+  await comPasta(async (statePath) => {
+    let envios = 0;
+    const client = {
+      async sendMessage() {
+        envios += 1;
+      },
+    } as unknown as Client;
+    const mensagem = resposta("5511946316274@c.us");
+    const caixa = {
+      async ler() {
+        return [mensagem];
+      },
+      async confirmar(_id: string, entregue: boolean) {
+        if (entregue) throw new Error("Supabase fora do ar");
+      },
+    } as unknown as CaixaDoAgente;
+    const monitor = new MonitorDoAgente(
+      client,
+      caixa,
+      entradaFalsa,
+      new StateStore(statePath),
+      config(statePath),
+    );
+
+    assert.equal(await monitor.bater(), 1);
+    assert.equal(await monitor.bater(), 0);
+    assert.equal(envios, 1);
+  });
+});
+
 test("uma falha segura a fila atrás dela em vez de furar a ordem", async () => {
   await comPasta(async (statePath) => {
     const { client, enviadas } = clienteFalso();
