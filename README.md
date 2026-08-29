@@ -1,254 +1,369 @@
-# Finanças Zap
+<p align="center">
+  <img
+    src="docs/assets/financas-zap-hero.png"
+    alt="Ilustração do Finanças Zap conectando a Casa, o backend financeiro e conversas no WhatsApp por meio de uma ponte local com pulso de relógio"
+    width="100%"
+  />
+</p>
 
-A ponte entre a Casa e o WhatsApp — e o relógio dela.
+<h1 align="center">Finanças Zap</h1>
 
-Este é um processo pequeno que roda no computador de casa. Ele não sabe o que
-aconteceu na Casa, não escreve mensagem e não consulta nada do módulo: pega o
-texto pronto que o Finanças deixou numa caixa de saída, entrega no WhatsApp e
-diz de volta se chegou.
+<p align="center">
+  <strong>O mensageiro e o relógio do ecossistema Finanças.</strong><br />
+  Uma ponte local, leve e resiliente entre o backend, o Supabase e o WhatsApp.
+</p>
 
-O que ele faz de mais importante, porém, nem parece trabalho: **ele diz as
-horas.** O Finanças não tem agendador. O resumo do dia, o panorama da semana, o
-do mês e o fechamento de um bloco de registros só acontecem porque esta ponte
-avisa o backend, antes de cada leitura, que o tempo passou. Ela não sabe o que
-venceu — quem decide é o backend. Ela só bate o relógio.
+<p align="center">
+  <a href="https://github.com/Boddenberg/financas-zap/actions/workflows/quality.yml">
+    <img alt="Pipeline de qualidade" src="https://img.shields.io/github/actions/workflow/status/Boddenberg/financas-zap/quality.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=qualidade" />
+  </a>
+  <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" />
+  <img alt="TypeScript 5.9" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img alt="WhatsApp Web.js 1.34" src="https://img.shields.io/badge/whatsapp--web.js-1.34-25D366?style=for-the-badge&logo=whatsapp&logoColor=white" />
+</p>
+
+<p align="center">
+  <img alt="Supabase REST e RPC" src="https://img.shields.io/badge/Supabase-REST%20%2B%20RPC-3ECF8E?style=flat-square&logo=supabase&logoColor=white" />
+  <img alt="Windows 10 e 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square&logo=windows11&logoColor=white" />
+  <img alt="Automação pessoal" src="https://img.shields.io/badge/escopo-automa%C3%A7%C3%A3o%20pessoal-8B5CF6?style=flat-square" />
+  <img alt="Integração não oficial" src="https://img.shields.io/badge/WhatsApp-integra%C3%A7%C3%A3o%20n%C3%A3o%20oficial-F59E0B?style=flat-square" />
+</p>
+
+<p align="center">
+  <a href="#visao-geral">Visão geral</a> •
+  <a href="#necessidade">Por que existe</a> •
+  <a href="#arquitetura">Arquitetura</a> •
+  <a href="#tecnologias">Tecnologias</a> •
+  <a href="#instalacao">Instalação</a> •
+  <a href="#operacao">Operação</a> •
+  <a href="#melhorias">Possíveis melhorias</a>
+</p>
+
+---
+
+<a id="visao-geral"></a>
+
+## 🌉 Visão geral
+
+O **Finanças Zap** mantém o sistema Finanças perto de quem o usa. Ele transforma
+filas do backend em avisos no WhatsApp e, no sentido contrário, transporta
+conversas para o agente financeiro sem colocar regras de negócio, credenciais
+administrativas ou inteligência artificial na máquina local.
+
+Hoje, uma única sessão do WhatsApp sustenta dois canais independentes:
+
+| 🟢 Avisos automáticos da Casa | 🟣 Conversa com o agente |
+| --- | --- |
+| Bate o relógio do backend, busca textos e artes prontos no Supabase e entrega em um grupo ou para números configurados. | Recebe texto, áudio ou imagem, encaminha um envelope ao Finanças e devolve a resposta com texto, imagens ou documentos. |
+| Usa `FINANCAS_BRIDGE_TOKEN`. | É opcional e usa `AGENTE_PONTE_CHAVE`. |
+| O backend decide quando fechar blocos, resumos e panoramas. | O backend interpreta, transcreve, autoriza e executa qualquer ação. |
+
+> [!IMPORTANT]
+> **A ponte transporta; o backend entende.** O Finanças Zap não consulta tabelas
+> de domínio, não escreve respostas, não transcreve áudios e não decide o que
+> uma mensagem significa.
+
+### O que passa pela ponte
+
+| Direção | Conteúdo suportado |
+| --- | --- |
+| Casa → WhatsApp | texto pronto e arte opcional |
+| WhatsApp → agente | texto, áudio e imagens JPEG, PNG ou WebP |
+| Agente → WhatsApp | texto, imagens e documentos/anexos |
+
+Documentos enviados **pelo usuário** ainda não entram no agente. Esse é um dos
+itens de produto propostos em [Possíveis melhorias](#melhorias).
+
+<a id="necessidade"></a>
+
+## 🎯 Por que ele existe
+
+O projeto resolve três lacunas bem concretas:
+
+| Necessidade | Como a ponte responde |
+| --- | --- |
+| **Dar noção de tempo ao backend** | Antes de ler a fila, envia um pulso. Sem um agendador próprio, é assim que o Finanças percebe que chegou a hora de fechar um bloco, produzir o resumo do dia ou gerar panoramas. |
+| **Levar o sistema até a rotina do usuário** | Avisos e conversas chegam no WhatsApp; não é preciso abrir um painel para cada atualização da Casa ou pergunta financeira. |
+| **Continuar funcionando em uma máquina doméstica** | Sessão persistente, cursor local, trava de instância única, Chromium enxuto, log rotativo e inicialização automática mantêm a ponte leve e recuperável. |
+
+Se o pulso falhar, a ponte ainda tenta entregar tudo o que já estiver na fila. O
+relógio pode atrasar a criação de novas mensagens, mas não silencia uma mensagem
+que já está pronta.
+
+<a id="arquitetura"></a>
+
+## 🧭 Arquitetura
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"fontFamily": "Inter, ui-sans-serif, system-ui", "lineColor": "#22d3ee"}}}%%
 flowchart LR
-    A[Casa registra<br/>uma atividade] --> B[Finanças<br/>fecha o período<br/>e escreve com IA]
-    B --> C[(caixa de saída<br/>no Supabase)]
-    C -->|lê| D[Finanças Zap<br/>neste computador]
-    D -->|entrega| E[WhatsApp<br/>do casal]
-    D -.->|pulso: agora são tais horas| B
+    API["Finanças<br/>regras + agente"]:::backend
+    CASA[("Outbox<br/>da Casa")]:::database
+    RESPOSTAS[("Outbox<br/>do agente")]:::database
+    ZAP["Finanças Zap<br/>ponte local + relógio"]:::bridge
+    WPP["WhatsApp<br/>privado ou grupo"]:::whatsapp
+
+    API -->|gera avisos| CASA
+    CASA -->|texto + arte| ZAP
+    ZAP -->|entrega| WPP
+    ZAP -->|confirma| CASA
+
+    WPP -->|texto + áudio + imagem| ZAP
+    ZAP -->|envelope| API
+    API -->|gera resposta| RESPOSTAS
+    RESPOSTAS -->|texto + anexos| ZAP
+    ZAP -->|responde| WPP
+    ZAP -.->|pulso: o tempo passou| API
+
+    classDef backend fill:#312e81,stroke:#8b5cf6,color:#ffffff,stroke-width:2px
+    classDef database fill:#0f766e,stroke:#2dd4bf,color:#ffffff,stroke-width:2px
+    classDef bridge fill:#0c4a6e,stroke:#22d3ee,color:#ffffff,stroke-width:3px
+    classDef whatsapp fill:#166534,stroke:#4ade80,color:#ffffff,stroke-width:2px
 ```
 
-Enquanto estiver ligado, o ciclo é sempre o mesmo:
+### Dois fluxos, uma sessão
 
-1. avisa o Finanças que o tempo passou (`POST /casa/whatsapp/pulso`), sem dizer
-   nem perguntar mais nada;
-2. chama somente a função `ler_mensagens_whatsapp_casa` no Supabase;
-3. recebe apenas `id`, `mensagem` pronta, a arte em base64 e `criada_em`;
-4. repassa `mensagem` sem formatar, filtrar ou consultar dados da Casa, com a
-   imagem como legenda quando ela vem;
-5. entrega para os números configurados ou para um grupo;
-6. devolve ao Finanças se a entrega deu certo
-   (`confirmar_mensagem_whatsapp_casa`);
-7. guarda a posição localmente, para recuperar mensagens após um reinício sem
-   repetir o que o servidor do WhatsApp já confirmou.
+1. **Canal da Casa:** pulsa `POST /casa/whatsapp/pulso`, lê
+   `ler_mensagens_whatsapp_casa`, entrega em ordem, confirma em
+   `confirmar_mensagem_whatsapp_casa` e avança o cursor local.
+2. **Canal conversacional:** recebe eventos do WhatsApp, envia texto/áudio/imagem
+   para `POST /whatsapp/recebidas`, pulsa `POST /whatsapp/pulso`, lê
+   `ler_caixa_whatsapp`, entrega a resposta ao JID original e confirma em
+   `confirmar_caixa_whatsapp`.
 
-Falhar no pulso nunca cala a entrega: uma mensagem que já está na caixa chega
-mesmo com o backend fora do ar.
+Os canais compartilham o cliente do WhatsApp, mas têm credenciais, contratos e
+arquivos de estado próprios. Deixar `AGENTE_PONTE_CHAVE` vazio desliga somente a
+conversa; os avisos da Casa continuam funcionando.
 
-> `whatsapp-web.js` é uma integração não oficial. Use apenas para automação
-> pessoal e de baixo volume. Mudanças no WhatsApp Web podem interromper o
-> funcionamento, e o uso automatizado está sujeito às regras do WhatsApp.
+### Confiabilidade que já existe
 
-## Pré-requisitos
+- **retomada local:** cursores preservam o ponto de leitura após reinícios;
+- **idempotência por destino:** uma falha parcial não repete destinatários da
+  Casa que o servidor do WhatsApp já confirmou;
+- **ordem de conversa:** uma resposta com falha segura a fila em vez de deixar
+  respostas posteriores ultrapassá-la;
+- **instância única:** um lock por PID impede duas pontes de dividirem o mesmo
+  perfil e a mesma sessão;
+- **ritmo adaptativo:** o agente consulta a cada 2 s enquanto alguém aguarda e a
+  cada 15 s quando está ocioso;
+- **observação sem janela:** o diário rotativo tem teto de 512 KB e uma cópia
+  anterior;
+- **baixo impacto:** Chromium sem GPU e com cache curto, processo abaixo da
+  prioridade normal e memória limitada pelo lançador do Windows.
 
-- Windows 10 ou 11;
-- Node.js 20 ou mais recente;
-- uma chave restrita da ponte, gerada no app Casa;
-- um celular com WhatsApp para conectar a sessão local.
+<a id="tecnologias"></a>
 
-## Instalação
+## 🧰 Tecnologias
+
+| Tecnologia | Papel no projeto |
+| --- | --- |
+| **Node.js 24** | runtime recomendado; o pacote aceita `>=20.9.0` |
+| **TypeScript 5.9** | código estrito, ES2022 e módulos Node16 |
+| **whatsapp-web.js 1.34** | adaptador da sessão e das mensagens do WhatsApp Web |
+| **Puppeteer + Chromium** | navegador local usado indiretamente pelo `whatsapp-web.js` |
+| **Supabase REST/RPC** | caixas de saída, leitura e confirmação de entregas |
+| **Fetch API** | comunicação HTTP com a API do Finanças |
+| **dotenv** | carregamento da configuração local |
+| **qrcode-terminal** | pareamento inicial sem interface gráfica |
+| **tsx + `node:test`** | desenvolvimento e suíte automatizada |
+| **PowerShell + VBScript** | instalação, execução invisível e diagnóstico no Windows |
+| **Agendador de Tarefas** | inicialização após o logon e recuperação automática |
+| **GitHub Actions + Dependabot** | testes, tipos, build, auditoria e atualização de dependências |
+
+> [!WARNING]
+> `whatsapp-web.js` é uma integração **não oficial**. Mudanças no WhatsApp Web
+> podem interromper o funcionamento, e qualquer automação continua sujeita às
+> regras do WhatsApp. Este projeto foi desenhado para uso pessoal e de baixo
+> volume.
+
+<a id="instalacao"></a>
+
+## 🚀 Instalação
+
+### Pré-requisitos
+
+- Windows 10 ou 11 para a automação oficial de inicialização;
+- Node.js 24 recomendado — ou qualquer versão compatível com `>=20.9.0`;
+- um celular com WhatsApp para parear a sessão local;
+- URL e chave pública `anon` do Supabase usado pelo Finanças;
+- API do Finanças disponível;
+- uma chave restrita da Casa e, opcionalmente, a chave do canal conversacional.
+
+### 1. Prepare o projeto
 
 ```powershell
-npm install
+git clone https://github.com/Boddenberg/financas-zap.git
+Set-Location financas-zap
+npm ci
 Copy-Item .env.example .env
 ```
 
-## Configuração
+### 2. Configure o ambiente
 
-No app, abra **Casa > Ajustes > WhatsApp**, gere a chave e clique em
-**Copiar configuração**. Use no `.env` a URL e a chave pública `anon` do mesmo
-Supabase do Finanças, além da chave restrita da ponte:
+No Finanças, abra **Casa → Ajustes → WhatsApp** e gere as chaves necessárias.
+Depois, preencha o `.env`:
 
 ```env
 SUPABASE_URL="https://SEU-PROJETO.supabase.co"
-SUPABASE_ANON_KEY="..."
-FINANCAS_BRIDGE_TOKEN="casa_wpp_..."
-FINANCAS_API_URL="https://seu-backend.up.railway.app/api/v1"
+SUPABASE_ANON_KEY="SUA-CHAVE-PUBLICA-ANON"
 
+FINANCAS_API_URL="https://seu-backend.up.railway.app/api/v1"
+FINANCAS_BRIDGE_TOKEN="casa_wpp_..."
+
+# Opcional: vazio mantém apenas os avisos automáticos da Casa.
+AGENTE_PONTE_CHAVE="wpp_..."
+
+# Use números OU um grupo. O grupo, quando preenchido, substitui os números.
 WHATSAPP_RECIPIENTS="5511999999999,5511888888888"
 WHATSAPP_GROUP_ID=""
 
+DEFAULT_COUNTRY_CODE="55"
 POLL_INTERVAL_SECONDS="60"
+AGENTE_POLL_ATIVO_MS="2000"
+AGENTE_POLL_PARADO_MS="15000"
+APP_TIMEZONE="America/Sao_Paulo"
 HEADLESS="true"
 ```
 
-Não configure e-mail, senha nem `SUPABASE_SERVICE_ROLE_KEY`. A chave `anon` é a
-chave pública do projeto; a função do banco exige também a chave restrita da
-ponte e retorna somente a caixa daquela residência. O banco guarda apenas o
-hash dessa chave. Qualquer morador pode revogá-la ou rotacioná-la em
-**Casa > Ajustes > WhatsApp**.
+> [!CAUTION]
+> Nunca use `SUPABASE_SERVICE_ROLE_KEY`. A ponte precisa somente da chave
+> pública `anon` combinada com tokens restritos, separados e revogáveis.
 
-Em `WHATSAPP_RECIPIENTS`, separe os números por vírgula. O código também aceita
-DDD + número e acrescenta o país configurado em `DEFAULT_COUNTRY_CODE` (55 por
-padrão).
+<details>
+<summary><strong>Referência das variáveis</strong></summary>
 
-## Primeira execução
+| Variável | Obrigatória | Padrão / função |
+| --- | --- | --- |
+| `SUPABASE_URL` | modo contínuo e demo | URL do projeto Supabase |
+| `SUPABASE_ANON_KEY` | modo contínuo e demo | chave pública do projeto |
+| `FINANCAS_API_URL` | modo contínuo e demo | API com o prefixo, normalmente `/api/v1` |
+| `FINANCAS_BRIDGE_TOKEN` | modo contínuo e demo | libera apenas o canal da Casa e seu pulso |
+| `AGENTE_PONTE_CHAVE` | não | liga o canal conversacional quando preenchida |
+| `WHATSAPP_RECIPIENTS` | uma das opções | números separados por vírgula |
+| `WHATSAPP_GROUP_ID` | uma das opções | ID terminado em `@g.us`; substitui os números |
+| `DEFAULT_COUNTRY_CODE` | não | `55` |
+| `POLL_INTERVAL_SECONDS` | não | `60`; aceita de 5 a 3600 |
+| `AGENTE_POLL_ATIVO_MS` | não | `2000` |
+| `AGENTE_POLL_PARADO_MS` | não | `15000` |
+| `APP_TIMEZONE` | não | `America/Sao_Paulo` |
+| `STATE_PATH` | não | `.runtime/casa-notifications.json` |
+| `TEST_MESSAGE` | não | `Teste do Finanças Zap` |
+| `HEADLESS` | não | `true` |
+
+`LOG_PATH` e o teto de memória do Node são definidos automaticamente pelo
+lançador da tarefa agendada.
+
+</details>
+
+### 3. Faça o primeiro pareamento
 
 ```powershell
 npm run dev
 ```
 
-Na primeira vez:
+1. Aguarde o QR Code aparecer no terminal.
+2. No celular, abra **WhatsApp → Aparelhos conectados → Conectar um aparelho**.
+3. Escaneie o código e espere a confirmação da sessão e das caixas de saída.
 
-1. o terminal desenha um QR Code;
-2. no celular, abra **WhatsApp > Aparelhos conectados > Conectar um aparelho**;
-3. escaneie o QR Code;
-4. aguarde as mensagens de que o WhatsApp e a caixa do Supabase estão prontos.
+O primeiro cursor nasce no horário da inicialização, portanto o histórico
+anterior não é disparado. Depois disso, novas mensagens acumuladas enquanto a
+ponte estiver offline são recuperadas quando ela voltar. A sessão fica salva em
+`.wwebjs_auth`, então os próximos inícios normalmente não pedem outro QR Code.
 
-Na estreia, o cursor nasce no horário da inicialização. O histórico antigo não
-é enviado. A partir daí, `.runtime/casa-notifications.json` registra a posição
-e as entregas parciais. Se a ponte ficar desligada, ela recupera as novas
-mensagens assim que voltar.
-
-Feito o pareamento uma vez, a sessão fica salva: os próximos inícios não pedem
-QR Code nenhum. É o que permite deixá-la subindo sozinha.
-
-## Deixar ligada com o computador
-
-Um comando põe a ponte para subir junto com o Windows, sem janela:
-
-```powershell
-npm run windows:instalar
-```
-
-Ele compila o projeto e cria uma tarefa no Agendador de Tarefas **do seu
-usuário** — não pede administrador e não instala serviço nenhum. A tarefa:
-
-- sobe a ponte **um minuto depois do logon**, enquanto o Windows ainda está
-  arrumando a casa;
-- **confere a cada dez minutos** se ela continua de pé, e a levanta se tiver
-  caído (queda de internet, sessão do WhatsApp derrubada, desligamento);
-- nunca sobe uma segunda cópia, mesmo se a conferência cair no meio de uma
-  execução;
-- roda com **prioridade abaixo do normal**, para nunca disputar processador com
-  quem estiver usando a máquina;
-- não tem limite de tempo de execução: ela pode ficar ligada por semanas.
-
-Para ligar agora, sem esperar o próximo logon:
-
-```powershell
-Start-ScheduledTask -TaskName "Financas Zap"
-```
-
-Para ver como ela está — é assim que se olha para um processo sem janela:
-
-```powershell
-npm run windows:situacao
-```
-
-A saída diz o estado da tarefa, há quanto tempo a ponte está de pé, quantos
-megabytes ela e o Chromium estão somando agora e as últimas linhas do diário.
-
-Para tirá-la da inicialização (a sessão do WhatsApp e o cursor continuam
-salvos):
-
-```powershell
-npm run windows:remover
-```
-
-### O diário
-
-Sem console, o que a ponte diria na tela vai para
-`.runtime/financas-zap.log`, com data e hora em cada linha. O arquivo tem teto
-de 512 KB: ao encher, o trecho anterior vira `financas-zap.log.anterior` e a
-escrita recomeça — um erro que se repita a cada minuto não vira um arquivo de
-vários gigabytes.
-
-É o lançador da inicialização que liga o diário, pela variável `LOG_PATH`. No
-terminal ele fica desligado de propósito: ali você já está vendo tudo.
-
-### Uma ponte por pasta
-
-Duas cópias rodando ao mesmo tempo dividiriam o mesmo perfil do Chromium e a
-mesma sessão do WhatsApp, e cada uma guardaria o próprio avanço do cursor — o
-estrago aparece como a mesma mensagem chegando duas vezes no celular de quem
-mora aqui. Por isso a ponte grava o próprio PID em
-`.runtime/financas-zap.lock` e recusa subir enquanto o processo anotado ali
-estiver vivo. Se ele já morreu, a trava é de quem chegou agora: um desligamento
-abrupto não deixa a ponte impedida de voltar.
-
-Na prática: se a inicialização automática estiver ativa e você quiser rodar
-`npm run dev`, `npm run demo:casa` ou `npm run list:groups` na mão, encerre
-antes a tarefa (`Stop-ScheduledTask -TaskName "Financas Zap"`).
-
-## O que ela pesa
-
-A ponte fica ligada o dia inteiro numa máquina de trabalho, não num servidor.
-Isso é um requisito, não um detalhe:
-
-- **um Chromium enxuto.** Sem GPU, sem rasterizador por software, sem som, sem
-  aviso do sistema, com um renderizador só e com o cache de disco preso em
-  32 MB — o que também segura o crescimento da pasta de sessão;
-- **um pulso por minuto.** Nada do que a Casa manda é urgente ao segundo: o
-  resumo tem hora marcada, o panorama tem dia marcado e o bloco fecha depois de
-  uma espera que o backend define. Ajuste em `POLL_INTERVAL_SECONDS` se quiser
-  outro ritmo;
-- **prioridade abaixo do normal**, herdada da tarefa do Windows por todos os
-  processos que ela abre;
-- **teto de memória** no lado do Node, que só manuseia texto e a arte em
-  base64.
-
-O peso real na sua máquina, a qualquer momento, sai em `npm run windows:situacao`.
-
-## Usar um grupo
-
-Liste os grupos visíveis para a conta conectada:
+### Usar um grupo
 
 ```powershell
 npm run list:groups
 ```
 
-Copie o identificador terminado em `@g.us` para:
+Copie o identificador terminado em `@g.us` para `WHATSAPP_GROUP_ID`. Com o grupo
+configurado, `WHATSAPP_RECIPIENTS` deixa de ser usado.
 
-```env
-WHATSAPP_GROUP_ID="120000000000000000@g.us"
-```
+<a id="operacao"></a>
 
-Quando `WHATSAPP_GROUP_ID` está preenchido, o grupo substitui os números
-privados; o aviso não é duplicado nos dois lugares.
+## ⚙️ Operação
 
-## Testar os destinatários
+### Comandos do dia a dia
 
-Antes de deixar a ponte ligada, é possível enviar apenas `TEST_MESSAGE`:
+| Comando | O que faz |
+| --- | --- |
+| `npm run dev` | executa o TypeScript em modo contínuo |
+| `npm run build` | compila para `dist/` |
+| `npm start` | executa o build compilado |
+| `npm run test:message` | envia somente `TEST_MESSAGE` aos destinos configurados |
+| `npm run list:groups` | lista os grupos visíveis e seus IDs |
+| `npm run demo:casa` | entrega os quatro formatos reais de prévia da Casa |
+| `npm run demo:casa -- --demo=resumo_diario` | entrega somente uma prévia real específica |
+| `npm run demo:casa -- --demo=inventado` | entrega uma demonstração com números fictícios |
+| `npm run windows:instalar` | compila e instala a inicialização automática |
+| `npm run windows:situacao` | mostra tarefa, uptime, memória e últimas linhas do diário |
+| `npm run windows:remover` | remove a tarefa sem apagar sessão nem cursor |
+
+As prévias reais usam o histórico, mas são enfileiradas como demonstração e não
+consomem o resumo do período.
+
+### Deixar ligado com o Windows
 
 ```powershell
-npm run test:message
+npm run windows:instalar
 ```
 
-O teste usa o mesmo grupo ou os mesmos números do monitor e encerra depois da
-confirmação do servidor do WhatsApp.
-
-## Testar a mensagem inteira
-
-Para ver o caminho completo — texto escrito pela IA e imagem do Analytics —
-com números inventados e assumidos como tal na primeira linha:
+A instalação não pede administrador. Ela cria a tarefa **Financas Zap** para o
+usuário atual, inicia um minuto após o logon, verifica a cada dez minutos se o
+processo continua vivo e mantém tudo sem janela e abaixo da prioridade normal.
 
 ```powershell
-npm run demo:casa
+# Ligar imediatamente
+Start-ScheduledTask -TaskName "Financas Zap"
+
+# Consultar a saúde local
+npm run windows:situacao
+
+# Parar para usar a ponte manualmente
+Stop-ScheduledTask -TaskName "Financas Zap"
+
+# Retirar da inicialização
+npm run windows:remover
 ```
 
-A ponte pede a demonstração ao Finanças, entrega o que estiver pendente na
-caixa e encerra. Com `npm run demo:casa -- --demo=resumo_diario`, a prévia usa
-o histórico de verdade sem gastar o resumo do período.
+> [!NOTE]
+> A trava de instância única impede `npm run dev`, demos ou listagens de grupos
+> enquanto a tarefa automática já estiver usando a mesma pasta e sessão.
 
-## Como o código está dividido
+### Arquivos locais e privados
+
+| Caminho | Conteúdo |
+| --- | --- |
+| `.env` | URLs e chaves revogáveis |
+| `.wwebjs_auth/` | sessão autenticada do WhatsApp |
+| `.wwebjs_cache/` | cache curto do WhatsApp Web |
+| `.runtime/casa-notifications.json` | cursor e entregas parciais dos avisos |
+| `.runtime/agente-whatsapp.json` | cursor do canal conversacional |
+| `.runtime/financas-zap.lock` | PID da instância ativa |
+| `.runtime/financas-zap.log` | diário rotativo da execução sem janela |
+
+Todos esses caminhos estão ignorados pelo Git. Não publique, copie para tickets
+ou inclua seu conteúdo em capturas de tela.
+
+## 🗂️ Organização do código
 
 | Arquivo | Responsabilidade |
 | --- | --- |
-| `config.ts` | valida todo o ambiente antes de qualquer coisa subir |
-| `backend-pulse.ts` | única porta para a API do Finanças (o pulso) |
-| `supabase-outbox-client.ts` | única porta para o Supabase (ler e confirmar) |
-| `whatsapp-client.ts` | única porta para o `whatsapp-web.js` |
-| `message-monitor.ts` | o ciclo: pulso, leitura, entrega, confirmação, cursor |
-| `state-store.ts` | retomada e idempotência local |
-| `single-instance.ts` | a trava que impede duas pontes na mesma pasta |
-| `log-file.ts` | o diário de quem roda sem tela |
+| `src/index.ts` | inicialização, QR Code, modos e coordenação dos dois canais |
+| `src/config.ts` | leitura e validação do ambiente |
+| `src/backend-pulse.ts` | pulso e demonstrações do canal da Casa |
+| `src/supabase-outbox-client.ts` | leitura e confirmação da outbox da Casa |
+| `src/message-monitor.ts` | ordem, entrega, retomada e cursor dos avisos |
+| `src/whatsapp-client.ts` | isolamento do `whatsapp-web.js`, destinos, grupos e ACK |
+| `src/state-store.ts` | persistência local dos cursores |
+| `src/single-instance.ts` | trava contra duas pontes na mesma pasta |
+| `src/log-file.ts` | espelhamento e rotação do diário |
+| `src/agente/entrada.ts` | envelope de texto, áudio ou imagem recebido |
+| `src/agente/caixa.ts` | outbox de respostas do agente |
+| `src/agente/monitor.ts` | polling adaptativo e entrega das respostas |
+| `scripts/` | instalação, diagnóstico e remoção no Windows |
 
-## Validação
+## ✅ Qualidade
 
 ```powershell
 npm test
@@ -257,40 +372,77 @@ npm run build
 npm audit --omit=dev
 ```
 
-## Solução de problemas
+O pipeline **Qualidade** executa instalação reproduzível, auditoria das
+dependências de produção, testes, verificação de tipos e build. O Dependabot
+acompanha dependências npm e as Actions usadas pelo repositório.
 
-- **Chave recusada:** gere uma nova em **Casa > Ajustes > WhatsApp**, copie a
-  chave para `FINANCAS_BRIDGE_TOKEN` e reinicie a ponte.
-- **"Falha ao avisar o Finanças do horário":** confira `FINANCAS_API_URL` (com
-  o `/api/v1`) e se o backend está no ar. A entrega do que já está na caixa
-  continua funcionando; o que para de acontecer é o fechamento de novos
-  períodos.
-- **"Já existe uma ponte rodando nesta pasta":** é a trava fazendo o trabalho
-  dela. Encerre a outra cópia — provavelmente a tarefa do Windows, com
-  `Stop-ScheduledTask -TaskName "Financas Zap"`.
-- **Nenhum resumo chega, mas a ponte está ligada:** confira em
-  **Casa > Ajustes > WhatsApp** se o tipo de mensagem está ativo e se o horário
-  já passou no fuso configurado.
-- **A tarefa aparece como "Pronta" e nada acontece:** rode
-  `npm run windows:situacao`. Resultado `2` significa que o projeto não estava
-  compilado — rode `npm run build`.
-- **Número não registrado:** use país + DDD + número e confirme que o contato
-  possui WhatsApp.
-- **Grupo não encontrado:** rode `npm run list:groups` novamente com a mesma
-  conta conectada.
-- **QR Code não apareceu:** aguarde o primeiro carregamento do Chromium e
-  confira a conexão.
-- **Sessão do WhatsApp corrompida:** encerre o processo, remova
-  `.wwebjs_auth/` e `.wwebjs_cache/` e conecte novamente pelo `npm run dev`.
-- **Estado local inválido:** preserve o arquivo para diagnóstico. Apagá-lo faz
-  a ponte recomeçar no horário atual, sem recuperar o intervalo anterior.
+<details>
+<summary><strong>Solução rápida de problemas</strong></summary>
 
-## Arquivos privados
+- **Chave recusada:** gere uma nova em **Casa → Ajustes → WhatsApp**, atualize o
+  `.env` e reinicie.
+- **Pulso falhou:** confira `FINANCAS_API_URL` e o backend. O que já estiver na
+  fila ainda será tentado.
+- **Já existe uma ponte:** pare a tarefa com
+  `Stop-ScheduledTask -TaskName "Financas Zap"` antes de executar manualmente.
+- **Nenhum resumo chega:** confira tipo de mensagem, horário e fuso configurados
+  no app, além de `npm run windows:situacao`.
+- **A tarefa fica como “Pronta”:** veja a situação. Resultado `2` costuma indicar
+  build ausente; rode `npm run build`.
+- **Grupo não encontrado:** liste novamente os grupos com a mesma conta pareada.
+- **QR Code não apareceu:** aguarde o primeiro Chromium carregar e confirme a
+  conexão da máquina.
+- **Sessão corrompida:** pare a ponte, preserve os arquivos para diagnóstico se
+  necessário, remova `.wwebjs_auth/` e `.wwebjs_cache/` e pareie novamente.
+- **Estado local inválido:** preserve o JSON para diagnóstico. Apagá-lo faz a
+  ponte recomeçar no horário atual e perder a recuperação do intervalo anterior.
 
-Não envie ao Git:
+</details>
 
-- `.env`, que contém a chave revogável da ponte;
-- `.wwebjs_auth/`, que contém a sessão do WhatsApp;
-- `.wwebjs_cache/`;
-- `.runtime/`, que contém o cursor, as confirmações, a trava e o diário;
-- `node_modules/`, `dist/` e logs.
+<a id="melhorias"></a>
+
+## 🧭 Possíveis melhorias
+
+Esta seção é um **mapa de evolução**, não uma lista de recursos já disponíveis.
+As propostas abaixo nascem de lacunas observáveis no código atual e cobrem tanto
+a saúde da ponte quanto a experiência de quem conversa com ela.
+
+### 🔧 Engenharia, segurança e operação
+
+| Prioridade | Melhoria | Ganho esperado |
+| --- | --- | --- |
+| **Alta** | Resolver os alertas atuais de supply chain na cadeia `whatsapp-web.js`/Puppeteer e anonimizar o caminho de log que ainda pode expor `author/from` completo. | Reduzir risco de dependências e proteger a privacidade por padrão. |
+| **Alta** | Criar uma fila local, durável e idempotente para mensagens recebidas quando o backend estiver indisponível. | Evitar que o usuário precise reenviar uma mensagem após uma queda temporária. |
+| **Alta** | Isolar o ciclo do agente do ciclo da Casa, com retry, backoff e circuit breaker. | Uma falha de leitura em um canal deixa de derrubar o outro. |
+| **Alta** | Registrar o progresso de respostas com vários anexos e aguardar confirmação do servidor também nesse canal. | Evitar texto ou anexos duplicados depois de uma falha parcial. |
+| **Média** | Padronizar timeout, retry com jitter e erros sanitizados nas RPCs do Supabase. | Impedir que uma conexão pendurada congele o ciclo inteiro. |
+| **Média** | Tornar a gravação do estado e a tomada da trava atômicas. | Recuperar com segurança após queda de energia e fechar uma rara corrida de inicialização. |
+| **Média** | Validar base64, MIME, tamanho e nome das mídias que saem do backend. | Bloquear payloads inválidos antes de consumir memória ou chegar ao WhatsApp. |
+| **Média** | Adicionar CI em Windows e smoke tests/Pester para os scripts de tarefa agendada. | Testar o ambiente que realmente hospeda a ponte, além do job Linux atual. |
+| **Futura** | Extrair um adaptador para a API oficial do WhatsApp e avaliar serviços para macOS/Linux. | Diminuir o acoplamento ao WhatsApp Web e ampliar portabilidade. |
+
+### ✨ Produto e experiência do usuário
+
+| Prioridade | Melhoria | Valor para o usuário |
+| --- | --- | --- |
+| **Alta** | Aceitar PDFs e outros documentos enviados ao agente. | Permitir mandar recibos, notas e extratos diretamente na conversa. |
+| **Alta** | Exibir no app um painel de saúde: online/offline, último pulso, última entrega, fila, erro de sessão e ação de reconexão. | Trocar investigação de logs por um estado claro e acionável. |
+| **Média** | Criar um assistente de primeira configuração ou comando `doctor`. | Validar `.env`, API, Supabase, destinatário, sessão e tarefa antes de aparecer um erro em produção. |
+| **Média** | Dar feedback no chat para processamento demorado, indisponibilidade temporária e formatos não suportados. | Evitar silêncio enquanto o backend trabalha ou não consegue responder. |
+| **Média** | Permitir grupo e números privados ao mesmo tempo, com preferências por tipo e horário. | Entregar cada aviso no lugar mais adequado para o casal. |
+| **Futura** | Oferecer atualização segura em um comando, rollback e alerta quando a ponte ficar muito tempo sem pulso. | Simplificar manutenção para quem não quer administrar um processo Node. |
+
+### Um próximo ciclo de maior impacto
+
+Se fosse preciso escolher somente três frentes, a melhor combinação seria:
+
+1. **fila durável de entrada + isolamento dos canais**, para não perder conversa;
+2. **suporte a documentos recebidos**, para ampliar o uso financeiro real;
+3. **painel de saúde e reconexão**, para tornar a ponte compreensível sem terminal.
+
+---
+
+<p align="center">
+  <strong>Finanças Zap</strong><br />
+  pequeno no computador, presente na rotina e consciente dos próprios limites.
+</p>
