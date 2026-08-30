@@ -4,7 +4,7 @@
 
 Este processo é uma ponte local e restrita. Ele lê a caixa de saída dedicada no
 Supabase e entrega `mensagem` (com a arte, quando ela vem) no WhatsApp. No outro
-sentido, repassa ao backend o envelope de textos e áudios recebidos; não
+sentido, repassa ao backend o envelope de textos, áudios e imagens recebidos; não
 transcreve, não interpreta eventos da Casa, não monta texto e não recebe uma
 credencial administrativa.
 
@@ -19,7 +19,7 @@ periódico nasceria. Quem decide o que venceu continua sendo o backend.
 - `supabase-outbox-client.ts` é a única porta para o Supabase.
 - `backend-pulse.ts` é a única porta para a API do Finanças.
 - `whatsapp-client.ts` é a única porta para `whatsapp-web.js`.
-- `agente/entrada.ts` desembrulha texto ou áudio e é a única porta de entrada
+- `agente/entrada.ts` desembrulha texto, áudio ou imagem e é a única porta de entrada
   para a API do Finanças. Áudio continua sendo transporte: a transcrição e a
   autorização para gastar com ela pertencem ao backend.
 - `message-monitor.ts` coordena pulso, leitura, ordenação, entrega, confirmação

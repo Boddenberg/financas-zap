@@ -4,6 +4,7 @@ import type { Client } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 import {
   createWhatsAppClient,
+  protectEventAttachmentFromNavigation,
   resolveDestinations,
   sendAndWaitForServerAcknowledgement,
 } from "./whatsapp-client";
@@ -42,6 +43,60 @@ test("o Chromium sobe enxuto, sem apagar o que o Puppeteer já desliga", () => {
     args.filter((argument) => argument.startsWith("--disable-features")),
     [],
   );
+});
+
+test("repete o registro dos eventos quando a página navega durante o ready", async () => {
+  let attachments = 0;
+  let waits = 0;
+  let readinessChecks = 0;
+  const client = {
+    attachEventListeners: async () => {
+      attachments += 1;
+      if (attachments === 1) {
+        const error = new Error(
+          "Protocol error (Page.addScriptToEvaluateOnNewDocument): Target closed",
+        );
+        error.name = "TargetCloseError";
+        throw error;
+      }
+    },
+    pupPage: {
+      waitForFunction: async () => {
+        readinessChecks += 1;
+      },
+    },
+  } as unknown as Client;
+
+  protectEventAttachmentFromNavigation(client, async () => {
+    waits += 1;
+  });
+  await (
+    client as unknown as { attachEventListeners: () => Promise<void> }
+  ).attachEventListeners();
+
+  assert.equal(attachments, 2);
+  assert.equal(waits, 1);
+  assert.equal(readinessChecks, 1);
+});
+
+test("não repete uma falha real ao registrar os eventos", async () => {
+  let attachments = 0;
+  const client = {
+    attachEventListeners: async () => {
+      attachments += 1;
+      throw new Error("módulo interno do WhatsApp não encontrado");
+    },
+  } as unknown as Client;
+
+  protectEventAttachmentFromNavigation(client, async () => undefined);
+
+  await assert.rejects(
+    (
+      client as unknown as { attachEventListeners: () => Promise<void> }
+    ).attachEventListeners(),
+    /módulo interno/,
+  );
+  assert.equal(attachments, 1);
 });
 
 test("usa o ID direto quando a consulta de número do WhatsApp falha", async () => {

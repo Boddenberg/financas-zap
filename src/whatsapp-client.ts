@@ -4,6 +4,91 @@ import type { AppConfig } from "./config";
 
 const SERVER_ACK_TIMEOUT_MS = 30_000;
 const GROUP_ID_SUFFIX = "@g.us";
+const EVENT_ATTACHMENT_RETRIES = 4;
+const PAGE_READY_TIMEOUT_MS = 15_000;
+const NAVIGATION_RETRY_DELAY_MS = 1_500;
+
+type ClientWithEventAttachment = Client & {
+  attachEventListeners: () => Promise<void>;
+};
+
+type Pause = (milliseconds: number) => Promise<void>;
+
+function errorDescription(error: unknown): string {
+  return error instanceof Error
+    ? `${error.name}: ${error.message}`
+    : String(error);
+}
+
+function isPageNavigationRace(error: unknown): boolean {
+  return /TargetCloseError|Target closed|Execution context was destroyed|Cannot find context/i.test(
+    errorDescription(error),
+  );
+}
+
+const pause: Pause = async (milliseconds) => {
+  await new Promise<void>((resolve) => setTimeout(resolve, milliseconds));
+};
+
+/**
+ * Repete somente o registro interrompido pela navegação inicial da página.
+ *
+ * O WhatsApp Web pode substituir o alvo do Chromium logo depois de sincronizar.
+ * Se isso acontecer enquanto o `whatsapp-web.js` chama `exposeFunction`, a
+ * rejeição fica presa no callback que emitiria `ready`: a conexão aparece como
+ * autenticada, mas o processo espera para sempre. O método ainda não faz parte
+ * dos tipos públicos da biblioteca, por isso todo o contorno fica confinado aqui.
+ */
+export function protectEventAttachmentFromNavigation(
+  client: Client,
+  wait: Pause = pause,
+): void {
+  const internalClient = client as ClientWithEventAttachment;
+
+  if (typeof internalClient.attachEventListeners !== "function") {
+    return;
+  }
+
+  const attachEventListeners =
+    internalClient.attachEventListeners.bind(internalClient);
+
+  internalClient.attachEventListeners = async (): Promise<void> => {
+    let lastError: unknown;
+
+    for (let attempt = 1; attempt <= EVENT_ATTACHMENT_RETRIES; attempt += 1) {
+      try {
+        await attachEventListeners();
+        return;
+      } catch (error) {
+        lastError = error;
+
+        if (!isPageNavigationRace(error)) {
+          throw error;
+        }
+
+        if (attempt === EVENT_ATTACHMENT_RETRIES) {
+          break;
+        }
+
+        console.warn(
+          `O WhatsApp recarregou durante a preparação. Repetindo o registro dos eventos (${attempt}/${EVENT_ATTACHMENT_RETRIES - 1})...`,
+        );
+        await wait(NAVIGATION_RETRY_DELAY_MS);
+
+        const page = internalClient.pupPage;
+        if (!page) {
+          throw error;
+        }
+
+        await page.waitForFunction('typeof window.WWebJS !== "undefined"', {
+          timeout: PAGE_READY_TIMEOUT_MS,
+        });
+      }
+    }
+
+    throw lastError;
+  };
+}
 
 /** O que vai para uma conversa: só texto, ou a arte do Analytics com legenda. */
 export type Delivery = {
@@ -88,7 +173,7 @@ const CHROMIUM_ENXUTO = [
 ];
 
 export function createWhatsAppClient(config: AppConfig): Client {
-  return new Client({
+  const client = new Client({
     authStrategy: new LocalAuth({
       dataPath: config.authDataPath,
     }),
@@ -101,6 +186,9 @@ export function createWhatsAppClient(config: AppConfig): Client {
       args: [...CHROMIUM_ENXUTO],
     },
   });
+
+  protectEventAttachmentFromNavigation(client);
+  return client;
 }
 
 function acknowledgementDescription(ack: MessageAck): string {
