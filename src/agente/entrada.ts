@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { Client, Message } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
+import { apelido, novoTraceId, registrar } from "../trace";
 import { erroDaResposta } from "./http";
 
 /**
@@ -97,6 +98,14 @@ export type Recebimento = {
   duplicada: boolean;
   /** Por que não virou resposta. O backend só conta à ponte, nunca ao WhatsApp. */
   motivo?: string;
+  /**
+   * O id que liga esta entrega ao que o backend fez com ela.
+   *
+   * Ele nasce aqui e vai no `X-Trace-Id`; o backend o adota em vez de gerar um
+   * (`app/main.py`). É o que faz a linha do diário desta máquina e a interação
+   * lá terem o mesmo número — antes disso eram dois diários sem nada em comum.
+   */
+  traceId: string;
 };
 
 const SUFIXO_GRUPO = "@g.us";
@@ -489,9 +498,26 @@ export class EntradaDoAgente {
    * limite estourado são casos normais, e repetir não corrigiria nenhum deles.
    */
   async entregar(envelope: EnvelopeRecebido): Promise<Recebimento> {
+    const traceId = novoTraceId();
+    registrar("whatsapp_entrega_iniciada", {
+      trace_id: traceId,
+      wa_id: envelope.waId,
+      conversa: envelope.conversa,
+      de: apelido(envelope.de),
+      grupo: apelido(envelope.grupo ?? undefined),
+      // A forma da mensagem, nunca o conteúdo dela. Ver `../trace.ts`.
+      tem_texto: Boolean(envelope.texto),
+      caracteres: envelope.texto?.length ?? 0,
+      tem_audio: Boolean(envelope.audio),
+      tem_imagem: Boolean(envelope.imagem),
+    });
     const resposta = await fetch(`${this.apiUrl}/whatsapp/recebidas`, {
       method: "POST",
-      headers: { "X-Ponte-Chave": this.chave, "Content-Type": "application/json" },
+      headers: {
+        "X-Ponte-Chave": this.chave,
+        "Content-Type": "application/json",
+        "X-Trace-Id": traceId,
+      },
       body: JSON.stringify({
         wa_id: envelope.waId,
         de: envelope.de,
@@ -522,8 +548,17 @@ export class EntradaDoAgente {
     });
 
     if (!resposta.ok) {
+      const detalhe = await erroDaResposta(resposta);
+      registrar("whatsapp_entrega_recusada", {
+        trace_id: traceId,
+        wa_id: envelope.waId,
+        status: resposta.status,
+        // O corpo do erro do backend já vem sem conteúdo de conversa; o que
+        // interessa aqui é o motivo, e ele cabe numa linha.
+        detalhe: detalhe.slice(0, 300),
+      });
       throw new Error(
-        `O Finanças recusou a mensagem recebida (${resposta.status}): ${await erroDaResposta(resposta)}`,
+        `O Finanças recusou a mensagem recebida (${resposta.status}): ${detalhe}`,
       );
     }
 
@@ -532,11 +567,20 @@ export class EntradaDoAgente {
       duplicada?: unknown;
       motivo?: unknown;
     };
-    return {
+    const recebimento: Recebimento = {
       aceita: corpo.aceita === true,
       duplicada: corpo.duplicada === true,
       motivo: typeof corpo.motivo === "string" ? corpo.motivo : undefined,
+      traceId,
     };
+    registrar("whatsapp_entrega_concluida", {
+      trace_id: traceId,
+      wa_id: envelope.waId,
+      aceita: recebimento.aceita,
+      duplicada: recebimento.duplicada,
+      motivo: recebimento.motivo,
+    });
+    return recebimento;
   }
 
   /** O relógio do canal: o backend não tem agendador, e ela é quem bate a hora. */

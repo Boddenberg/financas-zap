@@ -148,6 +148,12 @@ conversa; os avisos da Casa continuam funcionando.
   cada 15 s quando está ocioso;
 - **observação sem janela:** o diário rotativo tem teto de 512 KB e uma cópia
   anterior;
+- **um fio entre as duas máquinas:** cada mensagem entregue leva um
+  `X-Trace-Id` de 128 bits, que o backend adota em vez de gerar o dele. O
+  diário desta ponte escreve JSON por linha com esse id, então "a foto que não
+  chegou às 14:31" e a interação que falhou lá agora têm o mesmo número. O que
+  **não** vai para o diário é o conteúdo: nem texto, nem telefone, nem nome —
+  quem aparece em hash, o que aparece em tipo e tamanho (ver `src/trace.ts`);
 - **baixo impacto:** Chromium sem GPU e com cache curto, processo abaixo da
   prioridade normal e memória limitada pelo lançador do Windows.
 
