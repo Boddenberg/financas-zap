@@ -17,9 +17,12 @@ function destinoParaLog(jid: string): string {
  * ser uma **conversa** e não um aviso:
  *
  * - **o ritmo muda.** Quando alguém está esperando resposta, 2 segundos; parado,
- *   15. O agente pode dar três voltas de leitura numa pergunta funda, e com um
- *   poll fixo de 15s a pessoa esperaria até trinta por uma frase. Isto é a única
- *   esperteza da ponte, e ela é sobre transporte — não sobre conteúdo;
+ *   60. O agente pode dar três voltas de leitura numa pergunta funda, e com um
+ *   poll fixo a pessoa esperaria minutos por uma frase. Isto é a única
+ *   esperteza da ponte, e ela é sobre transporte — não sobre conteúdo. O ritmo
+ *   parado era 15 segundos e subiu para 60 em 24/09/2026: cada volta pulsa o
+ *   backend, que varre todos os módulos, e isso sozinho estourou a cota de
+ *   saída do Supabase com o hub em silêncio;
  * - **o endereço vem pronto.** A caixa devolve `jid`, e é para ele que se envia.
  */
 

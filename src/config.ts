@@ -339,7 +339,13 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     demoFormats: readDemoFormats(args),
     pollIntervalMs: readPollInterval(),
     agentePollAtivoMs: readIntervaloDoAgente("AGENTE_POLL_ATIVO_MS", 2_000),
-    agentePollParadoMs: readIntervaloDoAgente("AGENTE_POLL_PARADO_MS", 15_000),
+    // Parado eram 15 segundos, e viraram 60 em 24/09/2026. Cada volta é um
+    // pulso no backend, e o pulso varre todos os módulos: com o hub em
+    // silêncio isso batia ~5.760 vezes por dia, e o Supabase acusou a conta —
+    // a cota de saída estourou com duas pessoas usando o sistema. Quem espera
+    // resposta continua em 2 segundos (`aguardarResposta`), e nada do que sai
+    // com o canal parado é urgente ao segundo.
+    agentePollParadoMs: readIntervaloDoAgente("AGENTE_POLL_PARADO_MS", 60_000),
     timeZone: validateTimeZone(process.env.APP_TIMEZONE?.trim() || "America/Sao_Paulo"),
     ...watchConfig,
   };

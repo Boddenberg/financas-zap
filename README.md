@@ -226,7 +226,7 @@ WHATSAPP_GROUP_ID=""
 DEFAULT_COUNTRY_CODE="55"
 POLL_INTERVAL_SECONDS="60"
 AGENTE_POLL_ATIVO_MS="2000"
-AGENTE_POLL_PARADO_MS="15000"
+AGENTE_POLL_PARADO_MS="60000"
 APP_TIMEZONE="America/Sao_Paulo"
 HEADLESS="true"
 ```
@@ -250,7 +250,7 @@ HEADLESS="true"
 | `DEFAULT_COUNTRY_CODE` | não | `55` |
 | `POLL_INTERVAL_SECONDS` | não | `60`; aceita de 5 a 3600 |
 | `AGENTE_POLL_ATIVO_MS` | não | `2000` |
-| `AGENTE_POLL_PARADO_MS` | não | `15000` |
+| `AGENTE_POLL_PARADO_MS` | não | `60000` |
 | `APP_TIMEZONE` | não | `America/Sao_Paulo` |
 | `STATE_PATH` | não | `.runtime/casa-notifications.json` |
 | `TEST_MESSAGE` | não | `Teste do Finanças Zap` |
