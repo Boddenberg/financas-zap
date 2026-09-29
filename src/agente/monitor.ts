@@ -175,7 +175,7 @@ export class MonitorDoAgente {
     }
 
     if (ehImagem(primeiro)) {
-      await this.enviarAnexo(mensagem.jid, primeiro, mensagem.texto);
+      await this.enviarAnexo(mensagem.jid, primeiro, legendaDe(mensagem.texto));
       for (const anexo of demais) {
         await this.enviarAnexo(mensagem.jid, anexo);
       }
@@ -226,4 +226,14 @@ function texto(erro: unknown): string {
 
 function ehImagem(anexo: AnexoDaCaixa): boolean {
   return anexo.mime.startsWith("image/");
+}
+
+/**
+ * A legenda de uma imagem, ou nenhuma. O banco pede ao menos um caractere de
+ * texto, então uma foto que é a mensagem inteira (o cartão do fim de caçada do
+ * Huntera) chega com um espaço de largura zero: legenda feita só disso fica de
+ * fora, em vez de uma linha em branco embaixo da imagem.
+ */
+function legendaDe(texto: string): string | undefined {
+  return texto.replace(/[\s​-‍⁠﻿]/g, "") ? texto : undefined;
 }

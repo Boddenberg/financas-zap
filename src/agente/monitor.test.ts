@@ -300,6 +300,26 @@ test("a imagem continua levando o texto na legenda", async () => {
   });
 });
 
+test("imagem com texto invisível vai sem legenda", async () => {
+  await comPasta(async (statePath) => {
+    const { client, enviadas } = clienteFalso();
+    // O cartão do fim de caçada do Huntera: a imagem é a mensagem inteira.
+    const cartao = { ...resposta("5511946316274@c.us", [PNG]), texto: "​" };
+    const { caixa } = caixaFalsa([cartao]);
+
+    const monitor = new MonitorDoAgente(
+      client,
+      caixa,
+      entradaFalsa,
+      new StateStore(statePath),
+      config(statePath),
+    );
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, [{ jid: "5511946316274@c.us", tipo: "image/png", legenda: undefined }]);
+  });
+});
+
 test("o laço acelera quando alguém está esperando resposta", async () => {
   await comPasta(async (statePath) => {
     const monitor = new MonitorDoAgente(
