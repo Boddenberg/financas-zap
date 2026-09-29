@@ -320,6 +320,49 @@ test("imagem com texto invisível vai sem legenda", async () => {
   });
 });
 
+const MP4 = { nome: "cacada.mp4", mime: "video/mp4", conteudoBase64: "AAAAIGZ0eXA=" };
+const JPG = { nome: "cacada.jpg", mime: "image/jpeg", conteudoBase64: "/9j/4A==" };
+
+test("o cartão animado vai como GIF, sem a foto de reserva", async () => {
+  await comPasta(async (statePath) => {
+    const enviadas: Array<{ tipo: string; gif?: boolean }> = [];
+    const client = {
+      async sendMessage(_jid: string, conteudo: unknown, opcoes?: { sendVideoAsGif?: boolean }) {
+        enviadas.push({ tipo: (conteudo as { mimetype: string }).mimetype, gif: opcoes?.sendVideoAsGif });
+      },
+    } as unknown as Client;
+    const cartao = { ...resposta("5511946316274@c.us", [MP4, JPG]), texto: "​" };
+    const { caixa, confirmadas } = caixaFalsa([cartao]);
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, [{ tipo: "video/mp4", gif: true }]);
+    assert.deepEqual(confirmadas, [{ id: cartao.id, entregue: true }]);
+  });
+});
+
+test("se o vídeo não sai, a foto de reserva vai no lugar", async () => {
+  await comPasta(async (statePath) => {
+    const enviadas: string[] = [];
+    const client = {
+      async sendMessage(_jid: string, conteudo: unknown) {
+        const tipo = (conteudo as { mimetype: string }).mimetype;
+        if (tipo === "video/mp4") throw new Error("Data passed to getter must include an id property");
+        enviadas.push(tipo);
+      },
+    } as unknown as Client;
+    const cartao = { ...resposta("5511946316274@c.us", [MP4, JPG]), texto: "​" };
+    const { caixa, confirmadas } = caixaFalsa([cartao]);
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, ["image/jpeg"]);
+    assert.deepEqual(confirmadas, [{ id: cartao.id, entregue: true }]);
+  });
+});
+
 test("o laço acelera quando alguém está esperando resposta", async () => {
   await comPasta(async (statePath) => {
     const monitor = new MonitorDoAgente(

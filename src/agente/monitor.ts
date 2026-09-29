@@ -174,6 +174,26 @@ export class MonitorDoAgente {
       return;
     }
 
+    // O cartão animado do Huntera: o vídeo curto vai como GIF (toca sozinho,
+    // em loop, sem som) e a foto atrás dele é a reserva — só sai se o vídeo
+    // não sair. O WhatsApp Web já quebrou mídia uma vez (17/09/2026).
+    if (ehVideo(primeiro)) {
+      const reserva = demais.find(ehImagem);
+      try {
+        // Vídeo que trava (já aconteceu com versões do WhatsApp Web) não pode
+        // segurar a fila inteira: passado o limite, vai a foto.
+        await comLimite(
+          this.enviarAnexo(mensagem.jid, primeiro, legendaDe(mensagem.texto), true),
+          VIDEO_LIMITE_MS,
+        );
+      } catch (erro) {
+        if (!reserva) throw erro;
+        console.warn(`O vídeo da resposta ${mensagem.id} não saiu (${texto(erro)}); vai a foto.`);
+        await this.enviarAnexo(mensagem.jid, reserva, legendaDe(mensagem.texto));
+      }
+      return;
+    }
+
     if (ehImagem(primeiro)) {
       await this.enviarAnexo(mensagem.jid, primeiro, legendaDe(mensagem.texto));
       for (const anexo of demais) {
@@ -194,6 +214,7 @@ export class MonitorDoAgente {
     jid: string,
     anexo: AnexoDaCaixa,
     legenda?: string,
+    comoGif = false,
   ): Promise<void> {
     await this.client.sendMessage(
       jid,
@@ -201,7 +222,7 @@ export class MonitorDoAgente {
       {
         waitUntilMsgSent: true,
         ...(legenda === undefined ? {} : { caption: legenda }),
-        sendMediaAsDocument: !ehImagem(anexo),
+        ...(comoGif ? { sendVideoAsGif: true } : { sendMediaAsDocument: !ehImagem(anexo) }),
       },
     );
   }
@@ -226,6 +247,20 @@ function texto(erro: unknown): string {
 
 function ehImagem(anexo: AnexoDaCaixa): boolean {
   return anexo.mime.startsWith("image/");
+}
+
+const VIDEO_LIMITE_MS = 90_000;
+
+function comLimite<T>(promessa: Promise<T>, ms: number): Promise<T> {
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  const estouro = new Promise<never>((_, recusar) => {
+    relogio = setTimeout(() => recusar(new Error(`O WhatsApp não mandou o vídeo em ${ms / 1000} s.`)), ms);
+  });
+  return Promise.race([promessa, estouro]).finally(() => clearTimeout(relogio));
+}
+
+function ehVideo(anexo: AnexoDaCaixa): boolean {
+  return anexo.mime === "video/mp4";
 }
 
 /**
