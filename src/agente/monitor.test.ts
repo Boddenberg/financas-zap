@@ -381,3 +381,56 @@ test("o laço acelera quando alguém está esperando resposta", async () => {
     assert.equal(ativo, 2_000);
   });
 });
+
+test("número digitado vai para o endereço que o WhatsApp registrou", async () => {
+  await comPasta(async (statePath) => {
+    const enviadas: string[] = [];
+    const consultas: string[] = [];
+    const client = {
+      async getNumberId(numero: string) {
+        consultas.push(numero);
+        // Celular de antes do nono dígito: registrado sem ele.
+        return { _serialized: "551192888754@c.us" };
+      },
+      async sendMessage(jid: string) {
+        enviadas.push(jid);
+      },
+    } as unknown as Client;
+    const { caixa } = caixaFalsa([
+      resposta("5511992888754@c.us", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5511992888754@c.us", [], "33333333-3333-3333-3333-333333333333"),
+    ]);
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, ["551192888754@c.us", "551192888754@c.us"]);
+    assert.deepEqual(consultas, ["5511992888754"]);
+  });
+});
+
+test("grupo não é consultado e consulta que falha manda como veio", async () => {
+  await comPasta(async (statePath) => {
+    const enviadas: string[] = [];
+    let consultas = 0;
+    const client = {
+      async getNumberId() {
+        consultas += 1;
+        throw new Error("WhatsApp Web quebrou a consulta");
+      },
+      async sendMessage(jid: string) {
+        enviadas.push(jid);
+      },
+    } as unknown as Client;
+    const { caixa } = caixaFalsa([
+      resposta("120363411589990438@g.us", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5511946316274@c.us", [], "33333333-3333-3333-3333-333333333333"),
+    ]);
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, ["120363411589990438@g.us", "5511946316274@c.us"]);
+    assert.equal(consultas, 1);
+  });
+});

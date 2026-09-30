@@ -31,6 +31,7 @@ const ESPERA_MAXIMA_MS = 2 * 60 * 1000;
 export class MonitorDoAgente {
   private aguardando = 0;
   private aguardandoDesde = 0;
+  private readonly enderecos = new Map<string, string>();
 
   constructor(
     private readonly client: Client,
@@ -164,7 +165,8 @@ export class MonitorDoAgente {
    * dizendo o que são. Então, quando o primeiro anexo é documento, o texto vai
    * primeiro, sozinho, e os arquivos vêm logo atrás.
    */
-  private async despachar(mensagem: MensagemDaCaixa): Promise<void> {
+  private async despachar(original: MensagemDaCaixa): Promise<void> {
+    const mensagem = { ...original, jid: await this.endereco(original.jid) };
     const [primeiro, ...demais] = mensagem.anexos;
 
     if (!primeiro) {
@@ -208,6 +210,32 @@ export class MonitorDoAgente {
     for (const anexo of mensagem.anexos) {
       await this.enviarAnexo(mensagem.jid, anexo);
     }
+  }
+
+  /**
+   * O endereço de uma pessoa como o WhatsApp o registrou.
+   *
+   * Quem escreveu para a ponte já chega com o endereço certo, mas um número
+   * digitado (o amigo que recebe os drops do V-idle) pode estar registrado sem
+   * o nono dígito — celular de antes de 2012 —, e enviar para a grafia errada
+   * trava a fila atrás dele. Grupo passa direto. Se a consulta falhar, vai
+   * como veio: é o mesmo envio de antes, e o servidor diz se o destino existe.
+   */
+  private async endereco(jid: string): Promise<string> {
+    if (!jid.endsWith("@c.us")) return jid;
+    const guardado = this.enderecos.get(jid);
+    if (guardado) return guardado;
+    try {
+      const registrado = (await this.client.getNumberId(jid.slice(0, -"@c.us".length)))
+        ?._serialized;
+      if (registrado) {
+        this.enderecos.set(jid, registrado);
+        return registrado;
+      }
+    } catch {
+      // Algumas versões do WhatsApp Web quebram a consulta; o envio direto segue.
+    }
+    return jid;
   }
 
   private async enviarAnexo(
