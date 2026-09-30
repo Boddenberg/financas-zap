@@ -66,7 +66,14 @@ export class MonitorDoAgente {
 
   async rodar(sinal: AbortSignal): Promise<void> {
     while (!sinal.aborted) {
-      await this.bater();
+      try {
+        await this.bater();
+      } catch (erro) {
+        // Uma volta sem rede não pode encerrar o canal. Em 30/09/2026 um
+        // "fetch failed" aqui derrubou a ponte inteira às 05:51, e o que ficou
+        // de pé foi um processo sem WhatsApp que o agendador nunca reiniciou.
+        console.error(`Falha ao consultar ou entregar a caixa do agente: ${texto(erro)}`);
+      }
       await this.dormir(this.intervalo, sinal);
     }
   }

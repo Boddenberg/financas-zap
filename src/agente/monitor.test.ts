@@ -434,3 +434,40 @@ test("grupo não é consultado e consulta que falha manda como veio", async () =
     assert.equal(consultas, 1);
   });
 });
+
+test("uma volta sem rede não encerra o canal", async () => {
+  await comPasta(async (statePath) => {
+    const controle = new AbortController();
+    const enviadas: string[] = [];
+    const client = {
+      async sendMessage(jid: string) {
+        enviadas.push(jid);
+        controle.abort();
+      },
+    } as unknown as Client;
+    let leituras = 0;
+    const caixa = {
+      async ler() {
+        leituras += 1;
+        if (leituras === 1) throw new TypeError("fetch failed");
+        return [resposta("120363411589990438@g.us")];
+      },
+      async confirmar() {},
+    } as unknown as CaixaDoAgente;
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), {
+      ...config(statePath),
+      agentePollParadoMs: 5,
+    });
+    const erro = console.error;
+    console.error = () => undefined;
+    try {
+      await monitor.rodar(controle.signal);
+    } finally {
+      console.error = erro;
+    }
+
+    assert.equal(leituras, 2);
+    assert.deepEqual(enviadas, ["120363411589990438@g.us"]);
+  });
+});
