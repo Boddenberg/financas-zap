@@ -7,13 +7,18 @@
 '
 ' Ele espera pelo node (o True no fim do Run) de proposito: enquanto a ponte
 ' estiver de pe, a tarefa continua "em execucao", e a repeticao configurada no
-' agendador nao sobe uma segunda copia. Quando a ponte cai, a tarefa termina --
-' e a proxima repeticao a levanta de novo.
+' agendador nao sobe uma segunda copia.
+'
+' Quando a ponte cai com erro, ele mesmo a sobe de novo: 15 s, depois o dobro a
+' cada queda seguida, ate 5 min. Uma ponte que ficou de pe mais de 10 min volta
+' a esperar so 15 s. Saida 0 (encerrada de proposito) e 2 (.env recusado ou
+' outra ponte ja de pe) nao se repetem. A repeticao do agendador fica como rede
+' para o caso de o proprio wscript morrer.
 '
 ' Sem acentos: o wscript le .vbs na codificacao antiga do Windows.
 Option Explicit
 
-Dim shell, fso, raiz, comando, saida
+Dim shell, fso, raiz, comando, saida, inicio, espera
 
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -35,6 +40,16 @@ shell.Environment("PROCESS")("LOG_PATH") = ".runtime\financas-zap.log"
 shell.Environment("PROCESS")("NODE_OPTIONS") = "--max-old-space-size=512"
 
 comando = "node.exe """ & raiz & "\dist\index.js"""
-saida = shell.Run(comando, 0, True)
+espera = 15
+
+Do
+  inicio = Now
+  saida = shell.Run(comando, 0, True)
+  If saida = 0 Or saida = 2 Then Exit Do
+  If DateDiff("s", inicio, Now) > 600 Then espera = 15
+  WScript.Sleep espera * 1000
+  espera = espera * 2
+  If espera > 300 Then espera = 300
+Loop
 
 WScript.Quit saida
