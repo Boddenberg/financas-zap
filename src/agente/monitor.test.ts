@@ -390,22 +390,22 @@ test("número digitado vai para o endereço que o WhatsApp registrou", async () 
       async getNumberId(numero: string) {
         consultas.push(numero);
         // Celular de antes do nono dígito: registrado sem ele.
-        return { _serialized: "551192888754@c.us" };
+        return { _serialized: "551199990001@c.us" };
       },
       async sendMessage(jid: string) {
         enviadas.push(jid);
       },
     } as unknown as Client;
     const { caixa } = caixaFalsa([
-      resposta("5511992888754@c.us", [], "11111111-1111-1111-1111-111111111111"),
-      resposta("5511992888754@c.us", [], "33333333-3333-3333-3333-333333333333"),
+      resposta("5511999990001@c.us", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5511999990001@c.us", [], "33333333-3333-3333-3333-333333333333"),
     ]);
 
     const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
     await monitor.bater();
 
-    assert.deepEqual(enviadas, ["551192888754@c.us", "551192888754@c.us"]);
-    assert.deepEqual(consultas, ["5511992888754"]);
+    assert.deepEqual(enviadas, ["551199990001@c.us", "551199990001@c.us"]);
+    assert.deepEqual(consultas, ["5511999990001"]);
   });
 });
 
