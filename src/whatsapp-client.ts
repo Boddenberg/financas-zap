@@ -90,6 +90,82 @@ export function protectEventAttachmentFromNavigation(
   };
 }
 
+type ClientWithInjection = Client & {
+  inject: () => Promise<void>;
+  pupPage?: { evaluate: (expression: string) => Promise<unknown> };
+};
+
+/** O que a página diz depois da injeção: sincronizou e a ponte ainda não entrou. */
+const SINCRONIZOU_SEM_A_PONTE = `(() => {
+  try {
+    return window.require("WAWebSocketModel").Socket.hasSynced === true
+      && typeof window.WWebJS === "undefined"
+      && typeof window.onAppStateHasSyncedEvent === "function";
+  } catch {
+    return false;
+  }
+})()`;
+
+/** Folga para o aviso de verdade chegar antes de a ponte chamá-lo por conta própria. */
+const FOLGA_DO_AVISO_DE_SINCRONIA_MS = 5_000;
+
+/**
+ * Chama o aviso de "sincronizado" quando ele passou antes de alguém ouvir.
+ *
+ * O `whatsapp-web.js` só se considera autenticado no evento `change:hasSynced`,
+ * e liga esse ouvinte no fim da injeção, depois de uma dúzia de idas e voltas
+ * ao Chrome. Com a máquina lenta, o WhatsApp Web termina de sincronizar antes
+ * disso: o evento já passou, `authenticated` e `ready` nunca chegam, e a ponte
+ * espera para sempre com a página aberta e logada. Foi o que prendeu a ponte em
+ * 29/09/2026 (14:19 até 00:08) e duas vezes em 30/09 (conferido na página:
+ * `hasSynced` verdadeiro e `window.WWebJS` ausente). Chamar a mesma função que
+ * o evento chamaria destravou na hora.
+ */
+export function protectReadyFromEarlySync(
+  client: Client,
+  wait: Pause = pause,
+): void {
+  const internalClient = client as ClientWithInjection;
+
+  if (typeof internalClient.inject !== "function") {
+    return;
+  }
+
+  const inject = internalClient.inject.bind(internalClient);
+
+  const conferir = async (autenticou: () => boolean): Promise<void> => {
+    await wait(FOLGA_DO_AVISO_DE_SINCRONIA_MS);
+    // O aviso de verdade chegou: chamar de novo rodaria a preparação duas vezes.
+    if (autenticou()) return;
+    const page = internalClient.pupPage;
+    if (!page || (await page.evaluate(SINCRONIZOU_SEM_A_PONTE)) !== true) return;
+    console.warn(
+      "O WhatsApp sincronizou antes de a ponte ouvir. Seguindo sem esperar o aviso.",
+    );
+    await page.evaluate("window.onAppStateHasSyncedEvent()");
+  };
+
+  internalClient.inject = async (): Promise<void> => {
+    let autenticou = false;
+    const marcar = (): void => {
+      autenticou = true;
+    };
+    client.once("authenticated", marcar);
+    await inject();
+
+    // Em segundo plano: o `initialize` só liga o ouvinte de navegação quando a
+    // injeção termina, e segurá-la aqui abriria uma janela sem ele.
+    void conferir(() => autenticou)
+      .catch((error: unknown) => {
+        // Quem segura a ponte daqui em diante é o prazo de `index.ts`.
+        console.warn(
+          `Não foi possível conferir a sincronia do WhatsApp: ${errorDescription(error)}`,
+        );
+      })
+      .finally(() => client.off("authenticated", marcar));
+  };
+}
+
 /** O que vai para uma conversa: só texto, ou a arte do Analytics com legenda. */
 export type Delivery = {
   text: string;
@@ -188,6 +264,7 @@ export function createWhatsAppClient(config: AppConfig): Client {
   });
 
   protectEventAttachmentFromNavigation(client);
+  protectReadyFromEarlySync(client);
   return client;
 }
 

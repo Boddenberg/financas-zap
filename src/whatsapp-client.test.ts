@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import type { Client } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 import {
   createWhatsAppClient,
   protectEventAttachmentFromNavigation,
+  protectReadyFromEarlySync,
   resolveDestinations,
   sendAndWaitForServerAcknowledgement,
 } from "./whatsapp-client";
@@ -190,4 +192,60 @@ test("aceita o envio quando a versão atual do WhatsApp não devolve a mensagem"
 
   assert.equal(acknowledgement, "envio aceito pelo WhatsApp");
   assert.equal(removedListener, true);
+});
+
+/** Um cliente com a injeção e a página de mentira, e a folga sob controle do teste. */
+function clienteSincronizado(sincronizou: boolean) {
+  const chamadas: string[] = [];
+  const client = Object.assign(new EventEmitter(), {
+    inject: async () => undefined,
+    pupPage: {
+      evaluate: async (expressao: string) => {
+        chamadas.push(expressao.includes("onAppStateHasSyncedEvent()") ? "avisar" : "conferir");
+        return sincronizou;
+      },
+    },
+  });
+  let soltar = (): void => undefined;
+  const folga = new Promise<void>((resolve) => {
+    soltar = resolve;
+  });
+  const avisos = console.warn;
+  console.warn = () => undefined;
+  protectReadyFromEarlySync(client as unknown as Client, () => folga);
+  const terminar = async (): Promise<void> => {
+    soltar();
+    for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+    console.warn = avisos;
+  };
+  return { client, chamadas, terminar };
+}
+
+test("chama o aviso de sincronia que passou antes de a ponte ouvir", async () => {
+  const { client, chamadas, terminar } = clienteSincronizado(true);
+
+  await client.inject();
+  await terminar();
+
+  assert.deepEqual(chamadas, ["conferir", "avisar"]);
+});
+
+test("não chama o aviso quando ele chegou sozinho durante a folga", async () => {
+  const { client, chamadas, terminar } = clienteSincronizado(true);
+
+  await client.inject();
+  client.emit("authenticated");
+  await terminar();
+
+  assert.deepEqual(chamadas, []);
+  assert.equal(client.listenerCount("authenticated"), 0);
+});
+
+test("não chama o aviso enquanto o WhatsApp ainda não sincronizou", async () => {
+  const { client, chamadas, terminar } = clienteSincronizado(false);
+
+  await client.inject();
+  await terminar();
+
+  assert.deepEqual(chamadas, ["conferir"]);
 });
