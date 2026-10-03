@@ -65,7 +65,7 @@ Antes de concluir:
 npm test
 npm run typecheck
 npm run build
-npm audit --omit=dev
+npm run auditar   # o audit de produção, com as exceções escritas em .github/auditar.mjs
 ```
 
 Separe mudanças em commits pequenos. Só configure ou publique um remote quando

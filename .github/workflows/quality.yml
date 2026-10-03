@@ -32,7 +32,7 @@ jobs:
         run: npm ci
 
       - name: Auditar dependências de produção
-        run: npm audit --omit=dev --audit-level=high
+        run: npm run auditar
 
       - name: Executar testes
         run: npm test
