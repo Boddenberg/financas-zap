@@ -24,14 +24,14 @@
     "node": ">=20.9.0"
   },
   "dependencies": {
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.3",
     "qrcode-terminal": "^0.12.0",
     "whatsapp-web.js": "^1.34.7"
   },
   "devDependencies": {
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.2",
     "@types/qrcode-terminal": "^0.12.2",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "overrides": {
