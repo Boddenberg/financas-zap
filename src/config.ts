@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import dotenv from "dotenv";
 
@@ -7,6 +8,13 @@ export type AppConfig = {
   mode: RunMode;
   testMessage: string;
   headless: boolean;
+  /**
+   * O Google Chrome do computador, quando há. O Chromium que vem com o
+   * Puppeteer não tem H.264: o WhatsApp Web não consegue ler um vídeo nele, e
+   * o cartão animado do Huntera (um MP4 que vai como GIF) sai quebrado.
+   * `WHATSAPP_CHROME` escolhe outro; sem Chrome, fica o Chromium e só foto.
+   */
+  chromePath?: string;
   authDataPath: string;
   webCachePath: string;
   statePath: string;
@@ -35,6 +43,20 @@ export type AppConfig = {
   pollIntervalMs: number;
   timeZone: string;
 };
+
+const CHROMES_CONHECIDOS = [
+  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+  "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+  path.join(process.env.LOCALAPPDATA ?? "", "Google", "Chrome", "Application", "chrome.exe"),
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/usr/bin/google-chrome",
+];
+
+function acharChrome(): string | undefined {
+  const escolhido = process.env.WHATSAPP_CHROME?.trim();
+  if (escolhido) return existsSync(escolhido) ? escolhido : undefined;
+  return CHROMES_CONHECIDOS.find((caminho) => caminho && existsSync(caminho));
+}
 
 /** Os quatro tipos que a casa manda, na ordem em que se lê a conversa. */
 export const FORMATOS_DE_PREVIA = [
@@ -325,6 +347,7 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     mode,
     testMessage,
     headless: readBoolean("HEADLESS", true),
+    chromePath: acharChrome(),
     authDataPath: path.resolve(process.cwd(), ".wwebjs_auth"),
     webCachePath: path.resolve(process.cwd(), ".wwebjs_cache"),
     statePath: path.resolve(

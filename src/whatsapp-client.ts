@@ -259,6 +259,7 @@ export function createWhatsAppClient(config: AppConfig): Client {
     },
     puppeteer: {
       headless: config.headless,
+      ...(config.chromePath ? { executablePath: config.chromePath } : {}),
       args: [...CHROMIUM_ENXUTO],
     },
   });

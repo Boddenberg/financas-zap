@@ -303,10 +303,11 @@ async function main(): Promise<void> {
   });
 
   console.log("Iniciando o cliente local do WhatsApp...");
+  const navegador = config.chromePath ? "Google Chrome" : "Chromium (sem Chrome: vídeo não sai, só foto)";
   console.log(
     config.headless
-      ? "Chromium em modo headless (sem janela visível)."
-      : "Chromium com janela visível para diagnóstico.",
+      ? `${navegador} em modo headless (sem janela visível).`
+      : `${navegador} com janela visível para diagnóstico.`,
   );
 
   try {
