@@ -232,9 +232,14 @@ export class MonitorDoAgente {
     if (!jid.endsWith("@c.us")) return jid;
     const guardado = this.enderecos.get(jid);
     if (guardado) return guardado;
+    const numero = jid.slice(0, -"@c.us".length);
+    const lid = await this.lidDeQuemNuncaFalou(numero);
+    if (lid) {
+      this.enderecos.set(jid, lid);
+      return lid;
+    }
     try {
-      const registrado = (await this.client.getNumberId(jid.slice(0, -"@c.us".length)))
-        ?._serialized;
+      const registrado = (await this.client.getNumberId(numero))?._serialized;
       if (registrado) {
         this.enderecos.set(jid, registrado);
         return registrado;
@@ -243,6 +248,45 @@ export class MonitorDoAgente {
       // Algumas versões do WhatsApp Web quebram a consulta; o envio direto segue.
     }
     return jid;
+  }
+
+  /**
+   * O LID de um número que este WhatsApp nunca viu, perguntado ao servidor.
+   *
+   * O WhatsApp passou a endereçar as pessoas por um identificador interno, o
+   * LID, e o WhatsApp Web só conhece o de quem já conversou com o chip. Para
+   * os outros, o `sendMessage` do whatsapp-web.js 1.34.7 morre em "No LID for
+   * user" — e o `getNumberId` não ajuda, porque a consulta dele não grava o LID.
+   * Foi o que calou o código de confirmação do Huntrack para todo cliente novo
+   * entre 06 e 08/10/2026: cinco tentativas, descarte, e a fila inteira parada
+   * cinco minutos atrás de cada um. A biblioteca não tem correção (issue #3834).
+   *
+   * A sincronização de contatos do próprio WhatsApp Web devolve o LID, e o
+   * envio para `…@lid` abre a conversa. `null` quando o LID já é conhecido (o
+   * caminho de sempre funciona) ou quando a consulta não existe nesta versão do
+   * WhatsApp Web — aí o envio segue como antes, e o erro aparece no diário.
+   */
+  private async lidDeQuemNuncaFalou(numero: string): Promise<string | null> {
+    const pagina = this.client.pupPage;
+    if (!pagina) return null;
+    try {
+      return await pagina.evaluate(async (numero: string) => {
+        const wa = window as unknown as { require(modulo: string): any };
+        const contatos = wa.require("WAWebApiContact");
+        const wid = wa.require("WAWebWidFactory").createWid(`${numero}@c.us`);
+        if (contatos.getCurrentLid(wid)) return null;
+        const resposta = await wa.require("WAWebContactSyncUtils")
+          .constructUsyncDeltaQuery([{ type: "add", phoneNumber: numero }])
+          .execute();
+        const achado = resposta?.list?.[0];
+        // Registrado sem o nono dígito e conhecido assim: o `getNumberId` resolve.
+        if (achado?.pn && contatos.getCurrentLid(achado.pn)) return null;
+        return achado?.id?.server === "lid" && achado.id.user ? `${achado.id.user}@lid` : null;
+      }, numero);
+    } catch (erro) {
+      console.warn(`Não deu para perguntar o LID de um número novo: ${texto(erro)}`);
+      return null;
+    }
   }
 
   private async enviarAnexo(

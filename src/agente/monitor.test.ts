@@ -409,6 +409,73 @@ test("número digitado vai para o endereço que o WhatsApp registrou", async () 
   });
 });
 
+test("número que o chip nunca viu vai para o LID que o servidor devolve", async () => {
+  await comPasta(async (statePath) => {
+    const enviadas: string[] = [];
+    const perguntados: string[] = [];
+    let consultasDoNumero = 0;
+    const client = {
+      // O WhatsApp Web sem o LID do cliente novo: sem isto, "No LID for user".
+      pupPage: {
+        async evaluate(_corpo: unknown, numero: string) {
+          perguntados.push(numero);
+          return "678700000001@lid";
+        },
+      },
+      async getNumberId() {
+        consultasDoNumero += 1;
+        return { _serialized: "554899990001@c.us" };
+      },
+      async sendMessage(jid: string) {
+        enviadas.push(jid);
+      },
+    } as unknown as Client;
+    const { caixa } = caixaFalsa([
+      resposta("5548999990001@c.us", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5548999990001@c.us", [], "33333333-3333-3333-3333-333333333333"),
+    ]);
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, ["678700000001@lid", "678700000001@lid"]);
+    assert.deepEqual(perguntados, ["5548999990001"]);
+    assert.equal(consultasDoNumero, 0);
+  });
+});
+
+test("LID já conhecido ou pergunta que falha segue pelo número registrado", async () => {
+  await comPasta(async (statePath) => {
+    const enviadas: string[] = [];
+    let perguntas = 0;
+    const client = {
+      pupPage: {
+        async evaluate() {
+          perguntas += 1;
+          if (perguntas === 1) return null;
+          throw new Error("WAWebContactSyncUtils sumiu nesta versão");
+        },
+      },
+      async getNumberId(numero: string) {
+        return { _serialized: `${numero}@c.us` };
+      },
+      async sendMessage(jid: string) {
+        enviadas.push(jid);
+      },
+    } as unknown as Client;
+    const { caixa } = caixaFalsa([
+      resposta("5511999990001@c.us", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5511999990002@c.us", [], "33333333-3333-3333-3333-333333333333"),
+    ]);
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    await monitor.bater();
+
+    assert.deepEqual(enviadas, ["5511999990001@c.us", "5511999990002@c.us"]);
+    assert.equal(perguntas, 2);
+  });
+});
+
 test("grupo não é consultado e consulta que falha manda como veio", async () => {
   await comPasta(async (statePath) => {
     const enviadas: string[] = [];
