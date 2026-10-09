@@ -27,6 +27,7 @@ function destinoParaLog(jid: string): string {
  */
 
 const ESPERA_MAXIMA_MS = 2 * 60 * 1000;
+const SUFIXOS_DE_TELEFONE = ["@c.us", "@s.whatsapp.net"];
 
 export class MonitorDoAgente {
   private aguardando = 0;
@@ -231,10 +232,13 @@ export class MonitorDoAgente {
    * como veio: é o mesmo envio de antes, e o servidor diz se o destino existe.
    */
   private async endereco(jid: string): Promise<string> {
-    if (!jid.endsWith("@c.us")) return jid;
+    // A caixa manda `…@s.whatsapp.net` (`ler_caixa_whatsapp`); só `@c.us` era
+    // reconhecido, e nada daqui rodava para quem recebe pela caixa.
+    const sufixo = SUFIXOS_DE_TELEFONE.find((fim) => jid.endsWith(fim));
+    if (!sufixo) return jid;
     const guardado = this.enderecos.get(jid);
     if (guardado) return guardado;
-    const numero = jid.slice(0, -"@c.us".length);
+    const numero = jid.slice(0, -sufixo.length);
     const lid = await this.lidDeQuemNuncaFalou(numero);
     if (lid) {
       console.log(`Número que o chip nunca viu: vai pelo LID (destino_hash=${destinoParaLog(jid)}).`);

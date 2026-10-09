@@ -430,9 +430,10 @@ test("número que o chip nunca viu vai para o LID que o servidor devolve", async
         enviadas.push(jid);
       },
     } as unknown as Client;
+    // O formato que a caixa manda de verdade (`ler_caixa_whatsapp`).
     const { caixa } = caixaFalsa([
-      resposta("5548999990001@c.us", [], "11111111-1111-1111-1111-111111111111"),
-      resposta("5548999990001@c.us", [], "33333333-3333-3333-3333-333333333333"),
+      resposta("5548999990001@s.whatsapp.net", [], "11111111-1111-1111-1111-111111111111"),
+      resposta("5548999990001@s.whatsapp.net", [], "33333333-3333-3333-3333-333333333333"),
     ]);
 
     const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
