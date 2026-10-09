@@ -444,6 +444,37 @@ test("número que o chip nunca viu vai para o LID que o servidor devolve", async
   });
 });
 
+test("envio que falha refaz o endereço na próxima tentativa", async () => {
+  await comPasta(async (statePath) => {
+    let perguntas = 0;
+    let envios = 0;
+    const client = {
+      pupPage: {
+        async evaluate() {
+          perguntas += 1;
+          return "678700000001@lid";
+        },
+      },
+      async sendMessage() {
+        envios += 1;
+        if (envios === 1) throw new Error("No LID for user");
+      },
+    } as unknown as Client;
+    const mensagem = resposta("5548999990001@c.us");
+    const caixa = {
+      async ler() {
+        return [mensagem];
+      },
+      async confirmar() {},
+    } as unknown as CaixaDoAgente;
+
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    assert.equal(await monitor.bater(), 0);
+    assert.equal(await monitor.bater(), 1);
+    assert.equal(perguntas, 2);
+  });
+});
+
 test("LID já conhecido ou pergunta que falha segue pelo número registrado", async () => {
   await comPasta(async (statePath) => {
     const enviadas: string[] = [];

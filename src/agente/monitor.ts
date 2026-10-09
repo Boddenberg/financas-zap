@@ -134,6 +134,8 @@ export class MonitorDoAgente {
     } catch (erro) {
       const motivo = texto(erro);
       console.error(`Falha ao entregar a resposta ${mensagem.id}: ${motivo}`);
+      // O endereço guardado pode ser a causa; a próxima tentativa o refaz.
+      this.enderecos.delete(mensagem.jid);
       try {
         await this.caixa.confirmar(mensagem.id, false, motivo);
       } catch (falha) {
@@ -235,6 +237,7 @@ export class MonitorDoAgente {
     const numero = jid.slice(0, -"@c.us".length);
     const lid = await this.lidDeQuemNuncaFalou(numero);
     if (lid) {
+      console.log(`Número que o chip nunca viu: vai pelo LID (destino_hash=${destinoParaLog(jid)}).`);
       this.enderecos.set(jid, lid);
       return lid;
     }
@@ -251,20 +254,24 @@ export class MonitorDoAgente {
   }
 
   /**
-   * O LID de um número que este WhatsApp nunca viu, perguntado ao servidor.
+   * O LID de um número que este WhatsApp nunca viu, com o par gravado.
    *
    * O WhatsApp passou a endereçar as pessoas por um identificador interno, o
-   * LID, e o WhatsApp Web só conhece o de quem já conversou com o chip. Para
-   * os outros, o `sendMessage` do whatsapp-web.js 1.34.7 morre em "No LID for
-   * user" — e o `getNumberId` não ajuda, porque a consulta dele não grava o LID.
-   * Foi o que calou o código de confirmação do Huntrack para todo cliente novo
-   * entre 06 e 08/10/2026: cinco tentativas, descarte, e a fila inteira parada
-   * cinco minutos atrás de cada um. A biblioteca não tem correção (issue #3834).
+   * LID, e o envio só sai quando o WhatsApp Web tem gravado o **par** número ↔
+   * LID. Ele tem o de quem já conversou com o chip; para os outros, o
+   * `sendMessage` do whatsapp-web.js 1.34.7 morre em "No LID for user". Foi o
+   * que calou o código de confirmação do Huntrack para todo cliente novo entre
+   * 06 e 08/10/2026: cinco tentativas, descarte, e a fila inteira parada cinco
+   * minutos atrás de cada um. A biblioteca não tem correção (issue #3834).
    *
-   * A sincronização de contatos do próprio WhatsApp Web devolve o LID, e o
-   * envio para `…@lid` abre a conversa. `null` quando o LID já é conhecido (o
-   * caminho de sempre funciona) ou quando a consulta não existe nesta versão do
-   * WhatsApp Web — aí o envio segue como antes, e o erro aparece no diário.
+   * Saber o LID não basta: a primeira versão desta correção mandava para o
+   * `…@lid` sem o par e caiu no mesmo erro. Primeiro vai a consulta do próprio
+   * WhatsApp Web (a do `getNumberId`), que nas versões de outubro de 2026 grava
+   * o par; se ele não ficar, a ponte o grava como o WhatsApp Web faz, a partir
+   * da sincronização de contatos. `null` quando o número já é conhecido (o
+   * caminho de sempre funciona), quando não está no WhatsApp ou quando a
+   * consulta não existe nesta versão — aí o envio segue como antes, e o motivo
+   * aparece no diário.
    */
   private async lidDeQuemNuncaFalou(numero: string): Promise<string | null> {
     const pagina = this.client.pupPage;
@@ -275,16 +282,27 @@ export class MonitorDoAgente {
         const contatos = wa.require("WAWebApiContact");
         const wid = wa.require("WAWebWidFactory").createWid(`${numero}@c.us`);
         if (contatos.getCurrentLid(wid)) return null;
-        const resposta = await wa.require("WAWebContactSyncUtils")
-          .constructUsyncDeltaQuery([{ type: "add", phoneNumber: numero }])
-          .execute();
-        const achado = resposta?.list?.[0];
-        // Registrado sem o nono dígito e conhecido assim: o `getNumberId` resolve.
-        if (achado?.pn && contatos.getCurrentLid(achado.pn)) return null;
-        return achado?.id?.server === "lid" && achado.id.user ? `${achado.id.user}@lid` : null;
+
+        const existe = (await wa.require("WAWebQueryExistsJob").queryWidExists(wid))?.wid;
+        if (!existe) return null;
+        const lid = existe.server === "lid" ? existe : contatos.getCurrentLid(existe);
+        if (lid && contatos.getPhoneNumber(lid)) return `${lid.user}@lid`;
+
+        const achado = (
+          await wa.require("WAWebContactSyncUtils")
+            .constructUsyncDeltaQuery([{ type: "add", phoneNumber: numero }])
+            .execute()
+        )?.list?.[0];
+        if (achado?.id?.server !== "lid" || !achado.pn) return null;
+        await wa.require("WAWebDBCreateLidPnMappings").createLidPnMappings({
+          mappings: [{ pn: achado.pn, lid: achado.id }],
+          flushImmediately: true,
+          learningSource: "usync",
+        });
+        return contatos.getPhoneNumber(achado.id) ? `${achado.id.user}@lid` : null;
       }, numero);
     } catch (erro) {
-      console.warn(`Não deu para perguntar o LID de um número novo: ${texto(erro)}`);
+      console.warn(`Não deu para gravar o LID de um número novo: ${texto(erro)}`);
       return null;
     }
   }
