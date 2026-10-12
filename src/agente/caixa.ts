@@ -13,6 +13,9 @@ import { erroDaResposta } from "./http";
  * continua na resposta só pela janela de compatibilidade.
  */
 
+/** Quantas mensagens cada leitura pede, do lote cheio ao de uma só (ver `lerEmLote`). */
+const LOTES = [50, 10, 3, 1] as const;
+
 export type AnexoDaCaixa = {
   nome: string;
   mime: string;
@@ -87,11 +90,10 @@ export class CaixaDoAgente {
 
   async ler(criadaEm: string, cursorIds: string[]): Promise<MensagemDaCaixa[]> {
     const ultimoId = [...cursorIds].sort().at(-1);
-    const corpo = await this.rpc("ler_caixa_whatsapp", {
+    const corpo = await this.lerEmLote({
       p_chave: this.chave,
       p_depois_de: criadaEm,
       p_depois_de_id: ultimoId ?? null,
-      p_limite: 50,
     });
 
     if (!Array.isArray(corpo)) {
@@ -126,6 +128,27 @@ export class CaixaDoAgente {
       p_entregue: entregue,
       p_erro: erro ? erro.slice(0, 500) : null,
     });
+  }
+
+  /**
+   * A leitura desce de lote quando o banco estoura o tempo.
+   *
+   * Os anexos vêm em base64 dentro da própria leitura, e um cartão de caçada
+   * do Huntrack traz vídeo e foto. Com a fila acumulada (a ponte ficou fora de
+   * 09/10 a 12/10/2026), cinquenta linhas assim estouravam o `statement
+   * timeout` a cada volta, e a fila inteira parou atrás delas. Menos linhas
+   * por vez entregam o mesmo, só em mais voltas.
+   */
+  private async lerEmLote(argumentos: Record<string, unknown>): Promise<unknown> {
+    for (const [i, limite] of LOTES.entries()) {
+      try {
+        return await this.rpc("ler_caixa_whatsapp", { ...argumentos, p_limite: limite });
+      } catch (erro) {
+        const estourou = erro instanceof Error && /statement timeout/i.test(erro.message);
+        if (!estourou || i === LOTES.length - 1) throw erro;
+      }
+    }
+    return [];
   }
 
   private async rpc(funcao: string, argumentos: Record<string, unknown>): Promise<unknown> {
