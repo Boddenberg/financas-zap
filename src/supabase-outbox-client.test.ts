@@ -115,3 +115,28 @@ test("confirma a entrega pela mesma chave restrita, sem tocar em tabela", async 
     globalThis.fetch = originalFetch;
   }
 });
+
+test("a leitura e a confirmação da Casa vão com prazo de 30 s", async (t) => {
+  const sinais: unknown[] = [];
+  const prazos: number[] = [];
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, "timeout", (ms: number) => {
+    prazos.push(ms);
+    return timeout(ms);
+  });
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    sinais.push(init?.signal);
+    return new Response("[]", {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  });
+
+  const outbox = new SupabaseOutboxClient(config());
+  await outbox.listMessagesSince("2026-10-31T12:00:00.000Z", []);
+  await outbox.confirmDelivery("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", true);
+
+  assert.equal(sinais.length, 2);
+  assert.ok(sinais.every((sinal) => sinal instanceof AbortSignal));
+  assert.deepEqual(prazos, [30_000, 30_000]);
+});

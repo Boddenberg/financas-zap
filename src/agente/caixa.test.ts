@@ -46,3 +46,37 @@ test("outro erro não vira lote menor", async (t) => {
   await assert.rejects(new CaixaDoAgente(config).ler("2026-10-08T00:00:00Z", []), /chave inválida/);
   assert.deepEqual(pedidos, [50]);
 });
+
+test("toda chamada ao Supabase vai com prazo de 30 s", async (t) => {
+  const sinais: unknown[] = [];
+  const prazos: number[] = [];
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, "timeout", (ms: number) => {
+    prazos.push(ms);
+    return timeout(ms);
+  });
+  t.mock.method(globalThis, "fetch", async (_url: string, init: { signal?: unknown }) => {
+    sinais.push(init.signal);
+    return new Response(JSON.stringify([]), { status: 200 });
+  });
+
+  const caixa = new CaixaDoAgente(config);
+  await caixa.ler("2026-10-08T00:00:00Z", []);
+  await caixa.confirmar("a", true);
+
+  assert.equal(sinais.length, 2);
+  assert.ok(sinais.every((sinal) => sinal instanceof AbortSignal));
+  assert.deepEqual(prazos, [30_000, 30_000]);
+});
+
+test("um Supabase que não responde solta a volta com erro", async (t) => {
+  t.mock.method(AbortSignal, "timeout", () => AbortSignal.abort(new DOMException("prazo", "TimeoutError")));
+  t.mock.method(globalThis, "fetch", (_url: string, init: { signal: AbortSignal }) =>
+    new Promise((_resolver, recusar) => {
+      if (init.signal.aborted) recusar(init.signal.reason);
+      init.signal.addEventListener("abort", () => recusar(init.signal.reason));
+    }),
+  );
+
+  await assert.rejects(new CaixaDoAgente(config).ler("2026-10-08T00:00:00Z", []), /prazo/);
+});

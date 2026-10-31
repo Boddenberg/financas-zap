@@ -16,6 +16,9 @@ import { erroDaResposta } from "./http";
 /** Quantas mensagens cada leitura pede, do lote cheio ao de uma só (ver `lerEmLote`). */
 const LOTES = [50, 10, 3, 1] as const;
 
+/** Quanto uma chamada ao Supabase pode demorar. */
+const PRAZO_DO_SUPABASE_MS = 30_000;
+
 export type AnexoDaCaixa = {
   nome: string;
   mime: string;
@@ -156,6 +159,10 @@ export class CaixaDoAgente {
       method: "POST",
       headers: { apikey: this.anonKey, "Content-Type": "application/json" },
       body: JSON.stringify(argumentos),
+      // Sem prazo o `fetch` espera até 5 minutos pelo cabeçalho, e a escada de
+      // lotes multiplica isso por quatro. O estouro daqui não desce de lote: a
+      // mensagem não é a do `statement timeout`.
+      signal: AbortSignal.timeout(PRAZO_DO_SUPABASE_MS),
     });
 
     if (!resposta.ok) {

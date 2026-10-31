@@ -57,6 +57,12 @@ async function responseError(response: Response): Promise<string> {
   return text.slice(0, 500);
 }
 
+/**
+ * Quanto uma chamada ao Supabase pode demorar. Sem prazo, o `fetch` espera até
+ * 5 minutos pelo cabeçalho, e o laço da Casa fica parado esse tempo todo.
+ */
+const PRAZO_DO_SUPABASE_MS = 30_000;
+
 export class SupabaseOutboxClient {
   private readonly supabaseUrl: string;
   private readonly anonKey: string;
@@ -94,6 +100,7 @@ export class SupabaseOutboxClient {
         p_depois_de_id: lastCursorId ?? null,
         p_limite: 500,
       }),
+      signal: AbortSignal.timeout(PRAZO_DO_SUPABASE_MS),
     });
 
     if (!response.ok) {
@@ -139,6 +146,7 @@ export class SupabaseOutboxClient {
         p_entregue: delivered,
         p_erro: failure ? failure.slice(0, 500) : null,
       }),
+      signal: AbortSignal.timeout(PRAZO_DO_SUPABASE_MS),
     });
 
     if (!response.ok) {
