@@ -1,4 +1,5 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 
 /**
@@ -13,8 +14,16 @@ import path from "node:path";
  *
  * A trava é o PID em arquivo. Se o processo anotado não existe mais, ela é de
  * quem chegou agora: um desligamento abrupto não pode deixar a ponte impedida
- * de voltar.
+ * de voltar. Trava anotada antes de o computador ligar também é velha: o
+ * Windows reaproveita PIDs, e depois de um desligamento o número anotado pode
+ * ser de outro processo qualquer.
  */
+
+export type OpcoesDaTrava = {
+  /** Segundos desde que o computador ligou (`os.uptime`). */
+  uptime?: () => number;
+  agora?: () => number;
+};
 
 type Trava = {
   pid?: unknown;
@@ -43,7 +52,15 @@ function processoVivo(pid: number): boolean {
   }
 }
 
-function donoAtual(arquivo: string): number | undefined {
+function anteriorAoBoot(desde: unknown, opcoes: OpcoesDaTrava): boolean {
+  const anotada = typeof desde === "string" ? Date.parse(desde) : Number.NaN;
+  if (!Number.isFinite(anotada)) return false;
+  const agora = (opcoes.agora ?? Date.now)();
+  const boot = agora - (opcoes.uptime ?? os.uptime)() * 1000;
+  return anotada < boot;
+}
+
+function donoAtual(arquivo: string, opcoes: OpcoesDaTrava): number | undefined {
   let conteudo: string;
 
   try {
@@ -63,7 +80,12 @@ function donoAtual(arquivo: string): number | undefined {
 
   const pid = typeof trava.pid === "number" ? trava.pid : undefined;
 
-  if (pid === undefined || pid === process.pid || !processoVivo(pid)) {
+  if (
+    pid === undefined ||
+    pid === process.pid ||
+    anteriorAoBoot(trava.desde, opcoes) ||
+    !processoVivo(pid)
+  ) {
     return undefined;
   }
 
@@ -71,8 +93,11 @@ function donoAtual(arquivo: string): number | undefined {
 }
 
 /** Toma a trava e devolve como soltá-la. */
-export function claimSingleInstance(arquivo: string): () => void {
-  const pid = donoAtual(arquivo);
+export function claimSingleInstance(
+  arquivo: string,
+  opcoes: OpcoesDaTrava = {},
+): () => void {
+  const pid = donoAtual(arquivo, opcoes);
 
   if (pid !== undefined) {
     throw new InstanciaEmUso(pid, arquivo);

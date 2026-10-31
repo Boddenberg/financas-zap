@@ -83,3 +83,57 @@ test("uma trava ilegível é tratada como abandonada", () => {
   claimSingleInstance(arquivo)();
   apagar(arquivo);
 });
+
+test("uma trava anotada antes de o computador ligar é assumida, mesmo com o PID vivo", () => {
+  const arquivo = travaTemporaria();
+  // O PID anotado está vivo, mas a trava é de antes do boot: o Windows
+  // reaproveitou o número para outro processo.
+  const outroProcesso = spawn(process.execPath, ["-e", "setTimeout(() => undefined, 30000)"], {
+    stdio: "ignore",
+  });
+  const agora = Date.parse("2026-10-31T12:00:00.000Z");
+
+  try {
+    writeFileSync(
+      arquivo,
+      JSON.stringify({ pid: outroProcesso.pid, desde: "2026-10-31T09:00:00.000Z" }),
+      "utf8",
+    );
+
+    // Ligado há duas horas: o boot foi às 10:00, depois da trava das 09:00.
+    const liberar = claimSingleInstance(arquivo, { uptime: () => 2 * 60 * 60, agora: () => agora });
+
+    assert.equal(
+      (JSON.parse(readFileSync(arquivo, "utf8")) as { pid: number }).pid,
+      process.pid,
+    );
+    liberar();
+  } finally {
+    outroProcesso.kill();
+    apagar(arquivo);
+  }
+});
+
+test("uma trava anotada depois do boot, com o PID vivo, continua valendo", () => {
+  const arquivo = travaTemporaria();
+  const outraPonte = spawn(process.execPath, ["-e", "setTimeout(() => undefined, 30000)"], {
+    stdio: "ignore",
+  });
+  const agora = Date.parse("2026-10-31T12:00:00.000Z");
+
+  try {
+    writeFileSync(
+      arquivo,
+      JSON.stringify({ pid: outraPonte.pid, desde: "2026-10-31T11:00:00.000Z" }),
+      "utf8",
+    );
+
+    assert.throws(
+      () => claimSingleInstance(arquivo, { uptime: () => 2 * 60 * 60, agora: () => agora }),
+      InstanciaEmUso,
+    );
+  } finally {
+    outraPonte.kill();
+    apagar(arquivo);
+  }
+});
