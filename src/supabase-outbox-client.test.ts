@@ -140,3 +140,48 @@ test("a leitura e a confirmação da Casa vão com prazo de 30 s", async (t) => 
   assert.ok(sinais.every((sinal) => sinal instanceof AbortSignal));
   assert.deepEqual(prazos, [30_000, 30_000]);
 });
+
+test("a leitura da Casa que não desce no prazo do corpo pede um lote menor", async (t) => {
+  const pedidos: number[] = [];
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    const limite = JSON.parse(String(init?.body)).p_limite as number;
+    pedidos.push(limite);
+    const sinal = init?.signal as AbortSignal;
+    if (limite > 50) {
+      // O cabeçalho veio; o corpo (imagens em base64) para no meio, num link lento.
+      const corpo = new ReadableStream<Uint8Array>({
+        start(controle) {
+          controle.enqueue(new TextEncoder().encode("["));
+          sinal.addEventListener("abort", () => controle.error(sinal.reason));
+        },
+      });
+      return new Response(corpo, { status: 200 });
+    }
+    return new Response(
+      JSON.stringify([{ id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", mensagem: "oi", criada_em: "2026-10-31T12:00:01.000Z" }]),
+      { status: 200 },
+    );
+  });
+
+  const lidas = await new SupabaseOutboxClient(config(), { prazoDoCorpoMs: 20 }).listMessagesSince(
+    "2026-10-31T12:00:00.000Z",
+    [],
+  );
+
+  assert.deepEqual(pedidos, [500, 50]);
+  assert.deepEqual(lidas.map((m) => m.id), ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]);
+});
+
+test("outro erro da Casa não vira lote menor", async (t) => {
+  const pedidos: number[] = [];
+  t.mock.method(globalThis, "fetch", async (_input: unknown, init?: RequestInit) => {
+    pedidos.push(JSON.parse(String(init?.body)).p_limite as number);
+    return new Response(JSON.stringify({ message: "chave inválida" }), { status: 401 });
+  });
+
+  await assert.rejects(
+    new SupabaseOutboxClient(config()).listMessagesSince("2026-10-31T12:00:00.000Z", []),
+    /chave inválida/,
+  );
+  assert.deepEqual(pedidos, [500]);
+});

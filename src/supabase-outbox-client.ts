@@ -1,4 +1,5 @@
 import type { AppConfig } from "./config";
+import { chamarComPrazo, lotePedeMenos, PRAZO_DO_CORPO_MS } from "./supabase-prazo";
 
 type OutboxMessageResponse = {
   id?: unknown;
@@ -58,17 +59,18 @@ async function responseError(response: Response): Promise<string> {
 }
 
 /**
- * Quanto uma chamada ao Supabase pode demorar. Sem prazo, o `fetch` espera até
- * 5 minutos pelo cabeçalho, e o laço da Casa fica parado esse tempo todo.
+ * Quantas mensagens cada leitura pede. Com imagem em base64, um lote cheio pode
+ * não descer no prazo num link lento; aí a leitura pede menos (`lotePedeMenos`).
  */
-const PRAZO_DO_SUPABASE_MS = 30_000;
+const LOTES = [500, 50, 5, 1] as const;
 
 export class SupabaseOutboxClient {
   private readonly supabaseUrl: string;
   private readonly anonKey: string;
   private readonly bridgeToken: string;
+  private readonly prazoDoCorpoMs: number;
 
-  constructor(config: AppConfig) {
+  constructor(config: AppConfig, opcoes: { prazoDoCorpoMs?: number } = {}) {
     if (!config.supabaseUrl || !config.supabaseAnonKey || !config.bridgeToken) {
       throw new Error("A configuração da caixa do WhatsApp está incompleta.");
     }
@@ -76,6 +78,7 @@ export class SupabaseOutboxClient {
     this.supabaseUrl = config.supabaseUrl;
     this.anonKey = config.supabaseAnonKey;
     this.bridgeToken = config.bridgeToken;
+    this.prazoDoCorpoMs = opcoes.prazoDoCorpoMs ?? PRAZO_DO_CORPO_MS;
   }
 
   async connect(): Promise<void> {
@@ -86,30 +89,12 @@ export class SupabaseOutboxClient {
     createdAt: string,
     cursorIds: string[],
   ): Promise<OutboxMessage[]> {
-    const url = `${this.supabaseUrl}/rest/v1/rpc/ler_mensagens_whatsapp_casa`;
     const lastCursorId = [...cursorIds].sort().at(-1);
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        apikey: this.anonKey,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        p_chave: this.bridgeToken,
-        p_depois_de: createdAt,
-        p_depois_de_id: lastCursorId ?? null,
-        p_limite: 500,
-      }),
-      signal: AbortSignal.timeout(PRAZO_DO_SUPABASE_MS),
+    const body = await this.readInBatches({
+      p_chave: this.bridgeToken,
+      p_depois_de: createdAt,
+      p_depois_de_id: lastCursorId ?? null,
     });
-
-    if (!response.ok) {
-      throw new Error(
-        `Não foi possível ler a caixa do WhatsApp: ${await responseError(response)}`,
-      );
-    }
-
-    const body = (await response.json()) as unknown;
 
     if (!Array.isArray(body)) {
       throw new Error("O Supabase devolveu uma caixa do WhatsApp inválida.");
@@ -118,6 +103,39 @@ export class SupabaseOutboxClient {
     return (body as OutboxMessageResponse[]).map((message) =>
       this.mapMessage(message),
     );
+  }
+
+  private async readInBatches(args: Record<string, unknown>): Promise<unknown> {
+    const url = `${this.supabaseUrl}/rest/v1/rpc/ler_mensagens_whatsapp_casa`;
+
+    for (const [i, limit] of LOTES.entries()) {
+      try {
+        return await chamarComPrazo(
+          url,
+          {
+            method: "POST",
+            headers: {
+              apikey: this.anonKey,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ...args, p_limite: limit }),
+          },
+          async (response) => {
+            if (!response.ok) {
+              throw new Error(
+                `Não foi possível ler a caixa do WhatsApp: ${await responseError(response)}`,
+              );
+            }
+            return (await response.json()) as unknown;
+          },
+          this.prazoDoCorpoMs,
+        );
+      } catch (error) {
+        if (!lotePedeMenos(error) || i === LOTES.length - 1) throw error;
+      }
+    }
+
+    return [];
   }
 
   /**
@@ -134,26 +152,30 @@ export class SupabaseOutboxClient {
     failure?: string,
   ): Promise<void> {
     const url = `${this.supabaseUrl}/rest/v1/rpc/confirmar_mensagem_whatsapp_casa`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        apikey: this.anonKey,
-        "Content-Type": "application/json",
+    await chamarComPrazo(
+      url,
+      {
+        method: "POST",
+        headers: {
+          apikey: this.anonKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          p_chave: this.bridgeToken,
+          p_id: messageId,
+          p_entregue: delivered,
+          p_erro: failure ? failure.slice(0, 500) : null,
+        }),
       },
-      body: JSON.stringify({
-        p_chave: this.bridgeToken,
-        p_id: messageId,
-        p_entregue: delivered,
-        p_erro: failure ? failure.slice(0, 500) : null,
-      }),
-      signal: AbortSignal.timeout(PRAZO_DO_SUPABASE_MS),
-    });
-
-    if (!response.ok) {
-      throw new Error(
-        `Não foi possível registrar a entrega no Finanças: ${await responseError(response)}`,
-      );
-    }
+      async (response) => {
+        if (!response.ok) {
+          throw new Error(
+            `Não foi possível registrar a entrega no Finanças: ${await responseError(response)}`,
+          );
+        }
+      },
+      this.prazoDoCorpoMs,
+    );
   }
 
   private mapMessage(message: OutboxMessageResponse): OutboxMessage {
