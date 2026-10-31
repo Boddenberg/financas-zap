@@ -303,6 +303,74 @@ test("o GIF, que já tem prazo próprio, fica fora do vigia", async () => {
   await gif;
 });
 
+test("com o WhatsApp reconectando (sem internet), o vigia espera em vez de encerrar", async () => {
+  const travas: string[] = [];
+  let estado = "TIMEOUT";
+  let soltar: (() => void) | undefined;
+  const client = {
+    async getState() {
+      return estado;
+    },
+    async sendMessage() {
+      await new Promise<void>((resolver) => {
+        soltar = resolver;
+      });
+      return { id: { _serialized: "voltou" } };
+    },
+  } as unknown as Client;
+  const aviso = console.warn;
+  const avisos: string[] = [];
+  console.warn = (mensagem: string) => avisos.push(mensagem);
+
+  try {
+    vigiarEnvios(client, (motivo) => travas.push(motivo), 20, 10);
+    const preso = client.sendMessage("5511999999999@c.us", "preso");
+    await new Promise((resolver) => setTimeout(resolver, 70));
+    assert.deepEqual(travas, [], "rede fora não é página travada");
+    assert.ok(avisos.length >= 2, "o vigia rearma e pergunta de novo");
+    assert.match(avisos[0] ?? "", /TIMEOUT/);
+
+    // A rede voltou e o envio também: nada a encerrar.
+    soltar?.();
+    assert.deepEqual(await preso, { id: { _serialized: "voltou" } });
+    await new Promise((resolver) => setTimeout(resolver, 40));
+    assert.deepEqual(travas, []);
+
+    // Já com o WhatsApp de pé, um envio preso encerra como antes.
+    estado = "CONNECTED";
+    const outro = client.sendMessage("5511999999999@c.us", "preso de novo");
+    await new Promise((resolver) => setTimeout(resolver, 40));
+    assert.equal(travas.length, 1);
+    assert.match(travas[0] ?? "", /sem voltar \(estado: CONNECTED\)/);
+    soltar?.();
+    await outro;
+  } finally {
+    console.warn = aviso;
+  }
+});
+
+test("uma página que nem diz o estado encerra a ponte", async () => {
+  const travas: string[] = [];
+  let soltar: (() => void) | undefined;
+  const client = {
+    getState: () => new Promise(() => undefined),
+    async sendMessage() {
+      await new Promise<void>((resolver) => {
+        soltar = resolver;
+      });
+    },
+  } as unknown as Client;
+
+  vigiarEnvios(client, (motivo) => travas.push(motivo), 20, 10);
+  const preso = client.sendMessage("5511999999999@c.us", "preso");
+  await new Promise((resolver) => setTimeout(resolver, 60));
+
+  assert.equal(travas.length, 1);
+  assert.match(travas[0] ?? "", /a página não respondeu/);
+  soltar?.();
+  await preso;
+});
+
 test("o sandbox do Chromium só sai no Linux", () => {
   const semSandbox = ["--no-sandbox", "--disable-setuid-sandbox"];
 

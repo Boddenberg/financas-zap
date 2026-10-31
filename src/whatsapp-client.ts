@@ -1,4 +1,4 @@
-import { Client, LocalAuth, MessageAck, MessageMedia } from "whatsapp-web.js";
+import { Client, LocalAuth, MessageAck, MessageMedia, WAState } from "whatsapp-web.js";
 import type { Message, MessageSendOptions } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 
@@ -283,12 +283,55 @@ export function createWhatsAppClient(config: AppConfig): Client {
 /** Quanto um envio pode ficar sem voltar antes de a ponte se dar por travada. */
 export const ENVIO_TRAVADO_MS = 3 * 60 * 1000;
 
+/** Quanto a página tem para dizer o estado do WhatsApp. */
+export const PRAZO_DO_ESTADO_MS = 5_000;
+
+/**
+ * O estado do WhatsApp Web, ou `undefined` se a página não responde em
+ * `prazoMs` ou a pergunta falha: o `getState` é um `evaluate` e trava com ela.
+ */
+export async function estadoComPrazo(
+  client: Client,
+  prazoMs = PRAZO_DO_ESTADO_MS,
+): Promise<string | null | undefined> {
+  let relogio: ReturnType<typeof setTimeout> | undefined;
+  const semResposta = new Promise<undefined>((resolver) => {
+    relogio = setTimeout(() => resolver(undefined), prazoMs);
+  });
+
+  try {
+    return await Promise.race([
+      Promise.resolve().then(() => client.getState()),
+      semResposta,
+    ]);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(relogio);
+  }
+}
+
+/**
+ * O WhatsApp Web reconectando (sem internet, por exemplo): os estados que o
+ * whatsapp-web.js aceita sem dar a sessão por desconectada.
+ */
+const ESTADOS_DE_RECONEXAO: ReadonlySet<string> = new Set([
+  WAState.OPENING,
+  WAState.PAIRING,
+  WAState.TIMEOUT,
+]);
+
 /**
  * Um `sendMessage` que não volta é um WhatsApp Web travado: o processo segue
  * "em execução" e nada mais sai. Passado `limiteMs`, `aoTravar` encerra a
  * ponte e o `financas-zap.vbs` sobe outra. Isso é melhor que um prazo por
  * envio, que desistiria de uma mensagem que ainda pode sair e a mandaria duas
  * vezes na nova tentativa.
+ *
+ * Antes de encerrar, o vigia pergunta o estado. Reconectando é a internet que
+ * caiu: o envio sai quando ela voltar, e encerrar arriscaria duplicata (o
+ * WhatsApp Web reenvia a mensagem pendente da sessão e a ponte nova também).
+ * Aí o vigia espera mais `limiteMs`; só encerra com a página muda ou CONNECTED.
  *
  * O GIF fica de fora: ele já tem prazo próprio no canal do agente, que manda
  * a foto de reserva, e essa foto é vigiada como qualquer outro envio.
@@ -297,6 +340,7 @@ export function vigiarEnvios(
   client: Client,
   aoTravar: (motivo: string) => void,
   limiteMs = ENVIO_TRAVADO_MS,
+  prazoDoEstadoMs = PRAZO_DO_ESTADO_MS,
 ): void {
   const enviar = client.sendMessage.bind(client);
 
@@ -305,13 +349,35 @@ export function vigiarEnvios(
       return enviar(destino, conteudo, opcoes);
     }
 
-    const relogio = setTimeout(() => {
-      aoTravar(`Um envio ao WhatsApp passou de ${limiteMs / 1000} s sem voltar.`);
-    }, limiteMs);
+    let voltou = false;
+    let relogio: ReturnType<typeof setTimeout> | undefined;
+    let parado = 0;
+    const conferir = async (): Promise<void> => {
+      parado += limiteMs;
+      const estado = await estadoComPrazo(client, prazoDoEstadoMs);
+      if (voltou) return;
+      if (typeof estado === "string" && ESTADOS_DE_RECONEXAO.has(estado)) {
+        console.warn(
+          `Um envio ao WhatsApp está parado há ${parado / 1000} s com o WhatsApp em ${estado} ` +
+            "(sem internet?). A ponte espera a conexão voltar.",
+        );
+        armar();
+        return;
+      }
+      aoTravar(
+        `Um envio ao WhatsApp passou de ${parado / 1000} s sem voltar ` +
+          `(estado: ${estado === undefined ? "a página não respondeu" : String(estado)}).`,
+      );
+    };
+    const armar = (): void => {
+      relogio = setTimeout(() => void conferir(), limiteMs);
+    };
+    armar();
 
     try {
       return await enviar(destino, conteudo, opcoes);
     } finally {
+      voltou = true;
       clearTimeout(relogio);
     }
   }) as Client["sendMessage"];
