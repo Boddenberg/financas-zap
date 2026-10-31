@@ -163,13 +163,17 @@ registre o que já foi decidido e o que se faz quando quebrar. Não é burocraci
 
 ### 2.1 Os três arquivos sem teste são exatamente os que orquestram
 
-`index.ts` (459 linhas), `agente/caixa.ts` (146) e `agente/http.ts` (21) são os
+`index.ts` (457 linhas), `agente/caixa.ts` (146) e `agente/http.ts` (21) são os
 únicos sem `.test.ts`. Os dois primeiros não são detalhe: `index.ts` é onde o
 QR, a sessão, o ciclo de vida, o `AbortSignal` e as duas caixas se encontram, e
 `caixa.ts` é a porta do Supabase para o canal do agente — o irmão do
 `supabase-outbox-client.ts`, que **tem** 116 linhas de teste.
 
 O `http.ts` pode ficar sem: são 21 linhas de formatação de erro.
+
+> Os números acima são da leitura de 06/09/2026. Desde 12/10 o `caixa.ts` tem
+> teste (`caixa.test.ts`); em 31/10 continuam sem teste o `index.ts` (459
+> linhas) e o `http.ts` (19).
 
 **Proposta**
 
@@ -240,7 +244,7 @@ chegou hoje de manhã".
 | Peça | Hoje | Recomendação |
 | --- | --- | --- |
 | `whatsapp-web.js` | 1.34 (não oficial) | **Manter, e documentar a saída** (1.3). A alternativa oficial não atende o caso de uso e custa dinheiro por conversa. |
-| Node | 24 (`.node-version`), `engines >=20.9` | **Manter.** |
+| Node | 24 (`.node-version`), `engines >=24` | **Manter.** |
 | TypeScript | **^7.0.2** | **Atenção.** Este é o único repositório do workspace já no TS 7 (os outros três estão no 5.9). Está funcionando e o `build` passa no CI, então não é problema — mas é uma divergência que ninguém decidiu: vale ou alinhar os quatro, ou registrar num ADR por que este vai na frente. Divergência silenciosa entre repositórios é o que produz "funciona aqui e não lá". |
 | `tsconfig` | `strict` + `noUncheckedIndexedAccess` | **Manter, e copiar para os outros.** É a configuração mais correta dos quatro repositórios, e `noUncheckedIndexedAccess` é exatamente o que pega o bug de índice que os outros três podem ter. |
 | Executor de testes | `node --test` via `tsx` | **Manter.** Sem dependência extra, e a proporção de teste prova que funciona. Não trocar por Vitest só por uniformidade. |
@@ -281,7 +285,7 @@ inteiro numa máquina doméstica.
 | 2 | Agendador no backend, ponte como redundância (1.1) | `Financas` | meio dia |
 | 3 | `ultimo_pulso_em` + aviso de ponte muda (1.2) | `Financas` | meio dia |
 | 4 | `situacao.ps1` mostra o último pulso (2.3) | aqui | 2 h |
-| 5 | Teste de `agente/caixa.ts` (2.1) | aqui | meio dia |
+| 5 | Teste de `agente/caixa.ts` (2.1) — feito em 12/10/2026 | aqui | meio dia |
 | 6 | Medir o custo do polling de 2s (2.2) | aqui | 2 h |
 | 7 | Extrair a montagem de `index.ts` e testar (2.1) | aqui | 1 dia |
 | 8 | Decidir a divergência do TypeScript 7 (3) | workspace | 1 h |
