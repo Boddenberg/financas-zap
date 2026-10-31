@@ -8,9 +8,13 @@
     código só se ele seguir em linha reta (git pull --ff-only), reinstala as
     dependências do lock (npm ci), compila e inicia a tarefa de novo.
 
+    Durante a atualização a tarefa fica desabilitada: o gatilho de 10 em 10 min
+    subiria a ponte no meio do npm ci, com o dist velho.
+
     Se o git pull falhar, nada mudou e a tarefa volta a rodar como estava. Se o
-    npm ci ou a compilação falharem, a tarefa fica parada: resolva e rode de
-    novo. A sessão do WhatsApp, o cursor e o .env não são tocados.
+    npm ci ou a compilação falharem, a tarefa fica desabilitada: resolva e rode
+    de novo (ele a habilita no fim). A sessão do WhatsApp, o cursor e o .env
+    não são tocados.
 #>
 [CmdletBinding()]
 param(
@@ -45,6 +49,11 @@ function Stop-Ponte {
         Stop-ScheduledTask -TaskName $NomeDaTarefa
     }
 
+    # Desabilitada, a tarefa não sobe uma ponte no meio da atualização; com uma
+    # de pé, o Start-ScheduledTask do fim não faria nada (IgnoreNew). Vem depois
+    # do Stop: desabilitada, a tarefa pode não aparecer mais como Running.
+    Disable-ScheduledTask -TaskName $NomeDaTarefa | Out-Null
+
     # Parar a tarefa encerra o wscript; o node e o Chrome que ele subiu podem
     # ficar para trás, e a ponte nova encontraria a trava de uma viva.
     $processos = Get-CimInstance Win32_Process
@@ -62,6 +71,11 @@ function Stop-Ponte {
     }
 }
 
+function Start-Tarefa {
+    Enable-ScheduledTask -TaskName $NomeDaTarefa | Out-Null
+    Start-ScheduledTask -TaskName $NomeDaTarefa
+}
+
 function Invoke-Passo {
     param([string] $Descricao, [scriptblock] $Comando)
 
@@ -75,13 +89,18 @@ function Invoke-Passo {
 Push-Location $raiz
 try {
     $antes = (& git rev-parse --short HEAD)
-    Stop-Ponte
+    try {
+        Stop-Ponte
+    } catch {
+        Start-Tarefa
+        throw
+    }
 
     try {
         Invoke-Passo 'Trazendo o código novo (git pull --ff-only)...' { & git pull --ff-only }
     } catch {
         Write-Warning 'O git pull não andou; nada mudou. A ponte volta como estava.'
-        Start-ScheduledTask -TaskName $NomeDaTarefa
+        Start-Tarefa
         throw
     }
 
@@ -89,12 +108,13 @@ try {
         Invoke-Passo 'Reinstalando as dependências (npm ci)...' { & npm ci }
         Invoke-Passo 'Compilando a ponte...' { & npm run build }
     } catch {
-        Write-Warning 'A tarefa ficou parada. Resolva o erro acima e rode npm run windows:atualizar de novo.'
+        Write-Warning ("A tarefa `"$NomeDaTarefa`" ficou desabilitada, para não subir uma ponte pela metade. " +
+            'Resolva o erro acima e rode npm run windows:atualizar de novo: ele a habilita no fim.')
         throw
     }
 
     $depois = (& git rev-parse --short HEAD)
-    Start-ScheduledTask -TaskName $NomeDaTarefa
+    Start-Tarefa
 } finally {
     Pop-Location
 }
