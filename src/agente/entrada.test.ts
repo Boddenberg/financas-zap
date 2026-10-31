@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { type TestContext } from "node:test";
 import type { Message } from "whatsapp-web.js";
+import type { AppConfig } from "../config";
 import {
+  EntradaDoAgente,
+  type EnvelopeRecebido,
   FalhaAoBaixarImagemWhatsapp,
   FalhasRecentesImagem,
   avisarImagemIndisponivel,
@@ -385,4 +388,81 @@ test("o diário de uma mensagem descartada não grava o telefone inteiro", () =>
   assert.match(linha, /^conversa_hash=[0-9a-f]{16} servidor=c\.us$/);
   assert.match(origemParaLog({ author: "123456789012345@lid", from: "120363@g.us" }), /servidor=lid$/);
   assert.equal(origemParaLog({ author: undefined, from: "" }), "origem desconhecida");
+});
+
+const configDaEntrada = {
+  financasApiUrl: "https://financas.example/api/v1",
+  agenteChave: "wpp_" + "x".repeat(40),
+} as AppConfig;
+
+const envelopeDeTexto: EnvelopeRecebido = {
+  waId: "wa-1",
+  de: "5511981090986",
+  texto: "lavei a louça",
+  audio: null,
+  imagem: null,
+  conversa: "direta",
+  grupo: null,
+  nomeNoWhatsapp: null,
+  enviadaEm: null,
+};
+
+function semDiario(t: TestContext) {
+  t.mock.method(console, "log", () => undefined);
+}
+
+test("um 503 do backend é repassado de novo depois de 5 s, e o 202 vale", async (t) => {
+  semDiario(t);
+  const respostas = [
+    new Response(JSON.stringify({ detail: "fora do ar" }), { status: 503 }),
+    new Response(JSON.stringify({ aceita: true, duplicada: false }), { status: 202 }),
+  ];
+  const corpos: string[] = [];
+  t.mock.method(globalThis, "fetch", async (_url: string, init: { body: string }) => {
+    corpos.push(init.body);
+    return respostas.shift();
+  });
+  const esperas: number[] = [];
+  const entrada = new EntradaDoAgente(configDaEntrada, {
+    esperar: async (ms) => void esperas.push(ms),
+  });
+
+  const recibo = await entrada.entregar(envelopeDeTexto);
+
+  assert.equal(recibo.aceita, true);
+  assert.deepEqual(esperas, [5_000]);
+  assert.equal(corpos.length, 2);
+  assert.equal(corpos[0], corpos[1], "o mesmo wa_id: o backend descarta a repetição");
+});
+
+test("sem rede, o repasse tenta mais três vezes (5 s, 30 s, 2 min) e desiste", async (t) => {
+  semDiario(t);
+  let pedidos = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    pedidos += 1;
+    throw new TypeError("fetch failed");
+  });
+  const esperas: number[] = [];
+  const entrada = new EntradaDoAgente(configDaEntrada, {
+    esperar: async (ms) => void esperas.push(ms),
+  });
+
+  await assert.rejects(entrada.entregar(envelopeDeTexto), /fetch failed/);
+  assert.equal(pedidos, 4);
+  assert.deepEqual(esperas, [5_000, 30_000, 120_000]);
+});
+
+test("um 4xx do backend não é repetido", async (t) => {
+  semDiario(t);
+  let pedidos = 0;
+  t.mock.method(globalThis, "fetch", async () => {
+    pedidos += 1;
+    return new Response(JSON.stringify({ detail: "chave recusada" }), { status: 401 });
+  });
+  const entrada = new EntradaDoAgente(configDaEntrada, {
+    esperar: async () => assert.fail("não devia esperar"),
+  });
+
+  await assert.rejects(entrada.entregar(envelopeDeTexto), /chave recusada/);
+  assert.equal(pedidos, 1);
 });

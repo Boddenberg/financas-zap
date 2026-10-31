@@ -30,6 +30,12 @@ const AVISO_IMAGEM_REPETIDAMENTE_INDISPONIVEL =
   "Essa foto continua sem abrir aqui. Não precisa reenviar de novo agora — " +
   "tente outra imagem ou mais tarde.";
 const JANELA_FALHAS_IMAGEM_MS = 15 * 60 * 1_000;
+/**
+ * As esperas antes de repassar de novo uma mensagem recebida, quando a falha
+ * pode passar (rede, prazo, 5xx). Repetir é seguro: o backend descarta o
+ * mesmo `wa_id`. Sem isso, um soluço do backend perdia o que a pessoa escreveu.
+ */
+const ESPERAS_REPASSE_MS = [5_000, 30_000, 2 * 60_000] as const;
 
 type ClienteDaEntrada = Partial<
   Pick<Client, "getContactLidAndPhone" | "getMessageById" | "sendMessage">
@@ -491,16 +497,26 @@ export async function avisarImagemIndisponivel(
   );
 }
 
+/** Uma falha que outra tentativa pode resolver: rede, prazo ou 5xx. */
+class FalhaPassageira extends Error {}
+
+export type OpcoesDaEntrada = {
+  /** A pausa entre as tentativas de repasse (testes). */
+  esperar?: Esperar;
+};
+
 export class EntradaDoAgente {
   private readonly apiUrl: string;
   private readonly chave: string;
+  private readonly esperar: Esperar;
 
-  constructor(config: AppConfig) {
+  constructor(config: AppConfig, opcoes: OpcoesDaEntrada = {}) {
     if (!config.financasApiUrl || !config.agenteChave) {
       throw new Error("A configuração da entrada do agente está incompleta.");
     }
     this.apiUrl = config.financasApiUrl;
     this.chave = config.agenteChave;
+    this.esperar = opcoes.esperar ?? esperar;
   }
 
   /**
@@ -523,41 +539,71 @@ export class EntradaDoAgente {
       tem_audio: Boolean(envelope.audio),
       tem_imagem: Boolean(envelope.imagem),
     });
-    const resposta = await fetch(`${this.apiUrl}/whatsapp/recebidas`, {
-      method: "POST",
-      headers: {
-        "X-Ponte-Chave": this.chave,
-        "Content-Type": "application/json",
-        "X-Trace-Id": traceId,
-      },
-      body: JSON.stringify({
-        wa_id: envelope.waId,
-        de: envelope.de,
-        texto: envelope.texto,
-        audio: envelope.audio
-          ? {
-              nome: envelope.audio.nome,
-              tipo_mime: envelope.audio.tipoMime,
-              conteudo_base64: envelope.audio.conteudoBase64,
-            }
-          : null,
-        imagem: envelope.imagem
-          ? {
-              nome: envelope.imagem.nome,
-              tipo_mime: envelope.imagem.tipoMime,
-              conteudo_base64: envelope.imagem.conteudoBase64,
-              legenda: envelope.imagem.legenda,
-            }
-          : null,
-        conversa: envelope.conversa,
-        grupo: envelope.grupo,
-        nome_no_whatsapp: envelope.nomeNoWhatsapp,
-        enviada_em: envelope.enviadaEm,
-      }),
-      signal: AbortSignal.timeout(
-        envelope.audio || envelope.imagem ? TIMEOUT_MIDIA_MS : TIMEOUT_MS,
-      ),
+    const corpo = JSON.stringify({
+      wa_id: envelope.waId,
+      de: envelope.de,
+      texto: envelope.texto,
+      audio: envelope.audio
+        ? {
+            nome: envelope.audio.nome,
+            tipo_mime: envelope.audio.tipoMime,
+            conteudo_base64: envelope.audio.conteudoBase64,
+          }
+        : null,
+      imagem: envelope.imagem
+        ? {
+            nome: envelope.imagem.nome,
+            tipo_mime: envelope.imagem.tipoMime,
+            conteudo_base64: envelope.imagem.conteudoBase64,
+            legenda: envelope.imagem.legenda,
+          }
+        : null,
+      conversa: envelope.conversa,
+      grupo: envelope.grupo,
+      nome_no_whatsapp: envelope.nomeNoWhatsapp,
+      enviada_em: envelope.enviadaEm,
     });
+
+    for (let tentativa = 0; ; tentativa += 1) {
+      try {
+        return await this.repassar(envelope, traceId, corpo);
+      } catch (erro) {
+        const espera = ESPERAS_REPASSE_MS[tentativa];
+        if (espera === undefined || !(erro instanceof FalhaPassageira)) throw erro;
+        registrar("whatsapp_entrega_nova_tentativa", {
+          trace_id: traceId,
+          wa_id: envelope.waId,
+          tentativa: tentativa + 2,
+          espera_ms: espera,
+          detalhe: erro.message.slice(0, 300),
+        });
+        await this.esperar(espera);
+      }
+    }
+  }
+
+  private async repassar(
+    envelope: EnvelopeRecebido,
+    traceId: string,
+    corpo: string,
+  ): Promise<Recebimento> {
+    let resposta: Response;
+    try {
+      resposta = await fetch(`${this.apiUrl}/whatsapp/recebidas`, {
+        method: "POST",
+        headers: {
+          "X-Ponte-Chave": this.chave,
+          "Content-Type": "application/json",
+          "X-Trace-Id": traceId,
+        },
+        body: corpo,
+        signal: AbortSignal.timeout(
+          envelope.audio || envelope.imagem ? TIMEOUT_MIDIA_MS : TIMEOUT_MS,
+        ),
+      });
+    } catch (erro) {
+      throw new FalhaPassageira(erro instanceof Error ? erro.message : String(erro));
+    }
 
     if (!resposta.ok) {
       const detalhe = await erroDaResposta(resposta);
@@ -569,20 +615,21 @@ export class EntradaDoAgente {
         // interessa aqui é o motivo, e ele cabe numa linha.
         detalhe: detalhe.slice(0, 300),
       });
-      throw new Error(
+      const Falha = resposta.status >= 500 ? FalhaPassageira : Error;
+      throw new Falha(
         `O Finanças recusou a mensagem recebida (${resposta.status}): ${detalhe}`,
       );
     }
 
-    const corpo = (await resposta.json()) as {
+    const devolvido = (await resposta.json()) as {
       aceita?: unknown;
       duplicada?: unknown;
       motivo?: unknown;
     };
     const recebimento: Recebimento = {
-      aceita: corpo.aceita === true,
-      duplicada: corpo.duplicada === true,
-      motivo: typeof corpo.motivo === "string" ? corpo.motivo : undefined,
+      aceita: devolvido.aceita === true,
+      duplicada: devolvido.duplicada === true,
+      motivo: typeof devolvido.motivo === "string" ? devolvido.motivo : undefined,
       traceId,
     };
     registrar("whatsapp_entrega_concluida", {
