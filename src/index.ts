@@ -11,6 +11,7 @@ import {
   envelopeDe,
   idDaMensagem,
   idDaMensagemParaLog,
+  origemParaLog,
 } from "./agente/entrada";
 import { MonitorDoAgente } from "./agente/monitor";
 import { BackendPulseClient } from "./backend-pulse";
@@ -69,10 +70,10 @@ async function ligarOAgente(
     if (!envelope) {
       // Vale uma linha: sem ela, "nada aconteceu" não distingue "o evento não
       // chegou" de "chegou e eu descartei", e as duas causas são muito
-      // diferentes de investigar. O jid entra junto porque é ele que explica o
-      // descarte mais provável — um LID que não virou telefone.
+      // diferentes de investigar. O servidor do jid entra junto porque é ele
+      // que explica o descarte mais provável — um LID que não virou telefone.
       console.log(
-        `Mensagem ignorada pela ponte (${mensagem.author ?? mensagem.from ?? "origem desconhecida"}): própria conta, sem texto ou remetente irreconhecível.`,
+        `Mensagem ignorada pela ponte (${origemParaLog(mensagem)}): própria conta, sem texto ou remetente irreconhecível.`,
       );
       return;
     }

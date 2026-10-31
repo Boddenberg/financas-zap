@@ -172,6 +172,18 @@ export function conversaParaLog(conversa: string): string {
   return createHash("sha256").update(conversa).digest("hex").slice(0, 16);
 }
 
+/**
+ * De onde veio uma mensagem descartada, sem o telefone: o hash do remetente e
+ * o servidor do jid (`lid`, `c.us`, `g.us`). O servidor basta para ver o
+ * descarte mais provável, um LID que não virou telefone.
+ */
+export function origemParaLog(mensagem: Pick<Message, "author" | "from">): string {
+  const origem = mensagem.author ?? mensagem.from;
+  if (!origem) return "origem desconhecida";
+  const servidor = origem.includes("@") ? origem.slice(origem.lastIndexOf("@") + 1) : "?";
+  return `conversa_hash=${conversaParaLog(origem)} servidor=${servidor}`;
+}
+
 function normalizarIdParaBiblioteca(
   id:
     | { _serialized?: unknown; id?: unknown; remote?: unknown; fromMe?: unknown }

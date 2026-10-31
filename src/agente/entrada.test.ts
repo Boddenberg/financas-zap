@@ -7,6 +7,7 @@ import {
   avisarImagemIndisponivel,
   envelopeDe,
   numeroDoJid,
+  origemParaLog,
 } from "./entrada";
 
 /**
@@ -375,4 +376,13 @@ test("mensagens diferentes derivam ids diferentes", async () => {
   );
 
   assert.notEqual(um?.waId, outro?.waId);
+});
+
+test("o diário de uma mensagem descartada não grava o telefone inteiro", () => {
+  const linha = origemParaLog({ author: undefined, from: "5511981090986@c.us" });
+
+  assert.doesNotMatch(linha, /5511981090986/);
+  assert.match(linha, /^conversa_hash=[0-9a-f]{16} servidor=c\.us$/);
+  assert.match(origemParaLog({ author: "123456789012345@lid", from: "120363@g.us" }), /servidor=lid$/);
+  assert.equal(origemParaLog({ author: undefined, from: "" }), "origem desconhecida");
 });
