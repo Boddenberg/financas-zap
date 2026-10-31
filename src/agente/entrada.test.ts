@@ -3,6 +3,7 @@ import test, { type TestContext } from "node:test";
 import type { Message } from "whatsapp-web.js";
 import type { AppConfig } from "../config";
 import {
+  ConversasAceitas,
   EntradaDoAgente,
   type EnvelopeRecebido,
   FalhaAoBaixarImagemWhatsapp,
@@ -11,6 +12,7 @@ import {
   envelopeDe,
   numeroDoJid,
   origemParaLog,
+  tratarImagemIndisponivel,
 } from "./entrada";
 
 /**
@@ -465,4 +467,43 @@ test("um 4xx do backend não é repetido", async (t) => {
 
   await assert.rejects(entrada.entregar(envelopeDeTexto), /chave recusada/);
   assert.equal(pedidos, 1);
+});
+
+test("a foto que não abre num grupo nunca aceito não recebe aviso nenhum", async (t) => {
+  semDiario(t);
+  const enviadas: string[] = [];
+  const client = {
+    async sendMessage(destino: string) {
+      enviadas.push(destino);
+      return mensagem({ fromMe: true });
+    },
+  };
+  const aceitas = new ConversasAceitas();
+  aceitas.marcar("5511981090986@c.us");
+
+  await tratarImagemIndisponivel(
+    client,
+    mensagem({ from: "120363000000000001@g.us", author: "5511900000000@c.us" }),
+    new FalhasRecentesImagem(),
+    aceitas,
+  );
+  assert.deepEqual(enviadas, [], "o grupo da família não recebe a frase");
+
+  await tratarImagemIndisponivel(
+    client,
+    mensagem({ from: "5511981090986@c.us" }),
+    new FalhasRecentesImagem(),
+    aceitas,
+  );
+  assert.deepEqual(enviadas, ["5511981090986@c.us"], "a conversa aceita continua avisada");
+});
+
+test("uma conversa aceita há mais de 24 h deixa de receber o aviso", () => {
+  const aceitas = new ConversasAceitas();
+  const ontem = Date.parse("2026-10-30T12:00:00.000Z");
+  aceitas.marcar("120363000000000001@g.us", ontem);
+
+  assert.equal(aceitas.recente("120363000000000001@g.us", ontem + 23 * 60 * 60 * 1_000), true);
+  assert.equal(aceitas.recente("120363000000000001@g.us", ontem + 25 * 60 * 60 * 1_000), false);
+  assert.equal(aceitas.recente("120363000000000002@g.us", ontem), false);
 });

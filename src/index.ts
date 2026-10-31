@@ -3,15 +3,15 @@ import qrcode from "qrcode-terminal";
 import type { Client, Message } from "whatsapp-web.js";
 import { CaixaDoAgente } from "./agente/caixa";
 import {
+  ConversasAceitas,
   EntradaDoAgente,
   FalhaAoBaixarImagemWhatsapp,
   FalhasRecentesImagem,
-  avisarImagemIndisponivel,
   conversaParaLog,
   envelopeDe,
   idDaMensagem,
-  idDaMensagemParaLog,
   origemParaLog,
+  tratarImagemIndisponivel,
 } from "./agente/entrada";
 import { MonitorDoAgente } from "./agente/monitor";
 import { BackendPulseClient } from "./backend-pulse";
@@ -60,6 +60,7 @@ async function ligarOAgente(
   );
   const eventosRecentes = new Set<string>();
   const falhasDeImagem = new FalhasRecentesImagem();
+  const conversasAceitas = new ConversasAceitas();
 
   const repassar = async (mensagem: Message): Promise<void> => {
     // O `message_create` também dispara para o que o próprio agente acabou de
@@ -95,6 +96,9 @@ async function ligarOAgente(
         console.log(
           `whatsapp_entrada conversa_hash=${conversaHash} tipo=${tipo} resultado=${desfecho}`,
         );
+        if (recibo.aceita) {
+          conversasAceitas.marcar(mensagem.from ?? "origem-desconhecida");
+        }
         if (recibo.aceita && !recibo.duplicada) {
           monitor.aguardarResposta();
         }
@@ -119,18 +123,7 @@ async function ligarOAgente(
     void repassar(mensagem).catch(async (erro: unknown) => {
       console.error(`Falha ao ler a mensagem recebida: ${errorMessage(erro)}`);
       if (erro instanceof FalhaAoBaixarImagemWhatsapp) {
-        const chaveDaConversa = mensagem.from ?? "origem-desconhecida";
-        const quantidade = falhasDeImagem.registrar(chaveDaConversa);
-        try {
-          await avisarImagemIndisponivel(client, mensagem, quantidade >= 2);
-          console.log(
-            `whatsapp_media_falha_repetida message_id=${idDaMensagemParaLog(mensagem)} conversa_hash=${conversaParaLog(chaveDaConversa)} quantidade=${quantidade}`,
-          );
-        } catch (falha: unknown) {
-          console.error(
-            `Falha ao avisar que a imagem não pôde ser baixada: ${errorMessage(falha)}`,
-          );
-        }
+        await tratarImagemIndisponivel(client, mensagem, falhasDeImagem, conversasAceitas);
       }
     });
   };

@@ -30,6 +30,7 @@ const AVISO_IMAGEM_REPETIDAMENTE_INDISPONIVEL =
   "Essa foto continua sem abrir aqui. Não precisa reenviar de novo agora — " +
   "tente outra imagem ou mais tarde.";
 const JANELA_FALHAS_IMAGEM_MS = 15 * 60 * 1_000;
+const JANELA_CONVERSA_ACEITA_MS = 24 * 60 * 60 * 1_000;
 /**
  * As esperas antes de repassar de novo uma mensagem recebida, quando a falha
  * pode passar (rede, prazo, 5xx). Repetir é seguro: o backend descarta o
@@ -70,6 +71,31 @@ export class FalhasRecentesImagem {
 
   limpar(chave: string): void {
     this.falhas.delete(chave);
+  }
+}
+
+/**
+ * As conversas em que o backend aceitou alguma mensagem nas últimas 24 h,
+ * guardadas a partir do recibo.
+ *
+ * O aviso de foto indisponível sai antes de o backend dizer se a conversa é
+ * autorizada; sem esta trava, ele aparecia em qualquer grupo em que o chip
+ * está (a família, a equipe). Saber quem já foi aceito é transporte, não regra
+ * de produto: quem decide continua sendo o backend.
+ */
+export class ConversasAceitas {
+  private readonly aceitas = new Map<string, number>();
+
+  marcar(conversa: string, agora = Date.now()): void {
+    for (const [chave, em] of this.aceitas) {
+      if (agora - em > JANELA_CONVERSA_ACEITA_MS) this.aceitas.delete(chave);
+    }
+    this.aceitas.set(conversa, agora);
+  }
+
+  recente(conversa: string, agora = Date.now()): boolean {
+    const em = this.aceitas.get(conversa);
+    return em !== undefined && agora - em <= JANELA_CONVERSA_ACEITA_MS;
   }
 }
 
@@ -504,6 +530,36 @@ export type OpcoesDaEntrada = {
   /** A pausa entre as tentativas de repasse (testes). */
   esperar?: Esperar;
 };
+
+/**
+ * A foto não baixou: avisa quem mandou, se a conversa já foi aceita pelo
+ * backend nas últimas 24 h. Fora delas, só o diário.
+ */
+export async function tratarImagemIndisponivel(
+  client: ClienteDaEntrada,
+  mensagem: Message,
+  falhasDeImagem: FalhasRecentesImagem,
+  conversasAceitas: ConversasAceitas,
+): Promise<void> {
+  const chaveDaConversa = mensagem.from ?? "origem-desconhecida";
+  if (!conversasAceitas.recente(chaveDaConversa)) {
+    console.log(
+      `whatsapp_media_falha_sem_aviso message_id=${idDaMensagemParaLog(mensagem)} conversa_hash=${conversaParaLog(chaveDaConversa)}`,
+    );
+    return;
+  }
+  const quantidade = falhasDeImagem.registrar(chaveDaConversa);
+  try {
+    await avisarImagemIndisponivel(client, mensagem, quantidade >= 2);
+    console.log(
+      `whatsapp_media_falha_repetida message_id=${idDaMensagemParaLog(mensagem)} conversa_hash=${conversaParaLog(chaveDaConversa)} quantidade=${quantidade}`,
+    );
+  } catch (falha: unknown) {
+    console.error(
+      `Falha ao avisar que a imagem não pôde ser baixada: ${falha instanceof Error ? falha.message : "Erro desconhecido."}`,
+    );
+  }
+}
 
 export class EntradaDoAgente {
   private readonly apiUrl: string;
