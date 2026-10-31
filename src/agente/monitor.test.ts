@@ -716,3 +716,65 @@ test("com o WhatsApp fora de CONNECTED, a falha não conta como tentativa", asyn
     }
   });
 });
+
+test("a mensagem com anexo liberada atrás do cursor ainda sai, uma vez só", async () => {
+  await comPasta(async (statePath) => {
+    const { client, enviadas } = clienteFalso();
+    const t1 = new Date(Date.now() + 1_000).toISOString();
+    const t2 = new Date(Date.now() + 2_000).toISOString();
+    // X nasce `montando` em T1; Y, só texto, nasce em T2 e sai primeiro.
+    const x = { ...resposta("120363000000000001@g.us", [PNG], "11111111-1111-1111-1111-111111111111"), criadaEm: t1 };
+    const y = { ...resposta("120363000000000002@g.us", [], "33333333-3333-3333-3333-333333333333"), criadaEm: t2 };
+    const leituras: Array<{ depoisDe: string; ids: string[] }> = [];
+    const confirmadas: Array<{ id: string; entregue: boolean }> = [];
+    let falhaNaConfirmacaoDeY = true;
+    let pendentes: MensagemDaCaixa[] = [y];
+    const caixa = {
+      async ler(depoisDe: string, ids: string[]) {
+        leituras.push({ depoisDe, ids });
+        return pendentes;
+      },
+      async confirmar(id: string, entregue: boolean) {
+        confirmadas.push({ id, entregue });
+        if (id === y.id && falhaNaConfirmacaoDeY) {
+          falhaNaConfirmacaoDeY = false;
+          throw new Error("Supabase fora do ar");
+        }
+        if (entregue) pendentes = pendentes.filter((mensagem) => mensagem.id !== id);
+      },
+    } as unknown as CaixaDoAgente;
+    const store = new StateStore(statePath);
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, store, config(statePath));
+    const erro = console.error;
+    console.error = () => undefined;
+    try {
+      assert.equal(await monitor.bater(), 1);
+      assert.equal((await store.loadOrCreate()).cursorAt, t2);
+
+      // X vira `pendente` agora, com o `criada_em` de antes; Y continua lá
+      // porque a confirmação dela falhou.
+      pendentes = [x, y];
+      assert.equal(await monitor.bater(), 1);
+      assert.equal(await monitor.bater(), 0);
+    } finally {
+      console.error = erro;
+    }
+
+    assert.deepEqual(
+      enviadas.map((enviada) => enviada.jid),
+      ["120363000000000002@g.us", "120363000000000001@g.us"],
+      "X sai uma vez e Y não sai de novo",
+    );
+    assert.deepEqual(confirmadas, [
+      { id: y.id, entregue: true },
+      { id: x.id, entregue: true },
+      { id: y.id, entregue: true },
+    ]);
+    // A leitura volta 15 minutos antes do cursor.
+    assert.equal(
+      Date.parse(leituras[1]?.depoisDe ?? ""),
+      Date.parse(t2) - 15 * 60 * 1000,
+    );
+    assert.deepEqual(leituras[1]?.ids, []);
+  });
+});

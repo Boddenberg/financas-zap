@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { Client, MessageMedia, WAState } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
-import { advanceCursor, isAfterCursor, StateStore } from "../state-store";
+import {
+  advanceCursor,
+  inicioDaLeitura,
+  jaEntregue,
+  marcarEntregue,
+  StateStore,
+} from "../state-store";
 import type { AnexoDaCaixa, CaixaDoAgente, MensagemDaCaixa } from "./caixa";
 import type { EntradaDoAgente } from "./entrada";
 
@@ -137,15 +143,22 @@ export class MonitorDoAgente {
    * `ESPERAS_ENTRE_TENTATIVAS_MS`) e então é descartada sozinha.
    * Pular por cima manteria a ordem da conversa quebrada — a resposta de uma
    * pergunta chegando depois da resposta da seguinte.
+   *
+   * A leitura volta um pouco antes do cursor (`inicioDaLeitura`): a mensagem
+   * com anexo nasce `montando` e pode virar `pendente` depois que uma mais nova
+   * já saiu. Quem já foi entregue e reaparece (a confirmação não chegou ao
+   * banco) não sai de novo: só se confirma outra vez.
    */
   private async entregarPendentes(): Promise<number> {
     const estado = await this.store.loadOrCreate();
     let entregues = 0;
-    const lidas = await this.caixa.ler(estado.cursorAt, estado.cursorIds);
+    const lidas = await this.caixa.ler(inicioDaLeitura(estado), []);
     this.esquecerTentativas(lidas);
 
     for (const mensagem of lidas) {
-      if (!isAfterCursor(estado, { id: mensagem.id, createdAt: mensagem.criadaEm })) {
+      const marco = { id: mensagem.id, createdAt: mensagem.criadaEm };
+      if (jaEntregue(estado, marco)) {
+        await this.confirmarEntregue(mensagem.id);
         continue;
       }
       // Ainda na espera depois de uma falha: a fila continua parada atrás dela.
@@ -158,7 +171,8 @@ export class MonitorDoAgente {
       this.tentativas.delete(mensagem.id);
       entregues += 1;
       this.aguardando = Math.max(0, this.aguardando - 1);
-      advanceCursor(estado, { id: mensagem.id, createdAt: mensagem.criadaEm });
+      advanceCursor(estado, marco);
+      marcarEntregue(estado, marco);
       await this.store.save(estado);
     }
 
@@ -195,20 +209,22 @@ export class MonitorDoAgente {
     }
 
     // Depois que o WhatsApp aceitou, uma falha do Supabase não autoriza um
-    // segundo envio. O cursor local avança e a confirmação fica como falha de
-    // observabilidade; reenviar criaria duas notificações iguais no celular.
-    try {
-      await this.caixa.confirmar(mensagem.id, true);
-    } catch (erro) {
-      console.error(
-        `Resposta ${mensagem.id} entregue, mas não confirmada no Finanças: ${texto(erro)}`,
-      );
-    }
+    // segundo envio. O cursor local avança, a entrega fica anotada e a
+    // confirmação se repete quando a mensagem reaparecer na leitura.
+    await this.confirmarEntregue(mensagem.id);
     console.log(
       `Resposta ${mensagem.id} entregue em destino_hash=${destinoParaLog(mensagem.jid)}` +
         `${mensagem.anexos.length ? ` com ${mensagem.anexos.length} anexo(s)` : ""}.`,
     );
     return true;
+  }
+
+  private async confirmarEntregue(id: string): Promise<void> {
+    try {
+      await this.caixa.confirmar(id, true);
+    } catch (erro) {
+      console.error(`Resposta ${id} entregue, mas não confirmada no Finanças: ${texto(erro)}`);
+    }
   }
 
   /**

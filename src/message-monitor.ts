@@ -6,7 +6,9 @@ import type {
 } from "./supabase-outbox-client";
 import {
   advanceCursor,
-  isAfterCursor,
+  inicioDaLeitura,
+  jaEntregue,
+  marcarEntregue,
   type BridgeState,
   type StateStore,
 } from "./state-store";
@@ -123,11 +125,12 @@ export class MessageMonitor {
     return sent;
   }
 
+  /**
+   * Como no canal do agente, a leitura volta um pouco antes do cursor
+   * (`inicioDaLeitura`) e o que já saiu e reaparece só é confirmado de novo.
+   */
   private async processAvailable(state: BridgeState): Promise<number> {
-    const messages = await this.outbox.listMessagesSince(
-      state.cursorAt,
-      state.cursorIds,
-    );
+    const messages = await this.outbox.listMessagesSince(inicioDaLeitura(state), []);
     messages.sort(
       (first, second) =>
         Date.parse(first.createdAt) - Date.parse(second.createdAt) ||
@@ -136,7 +139,8 @@ export class MessageMonitor {
     let sent = 0;
 
     for (const message of messages) {
-      if (!isAfterCursor(state, message)) {
+      if (jaEntregue(state, message)) {
+        await this.reportDelivery(message);
         continue;
       }
 
@@ -151,6 +155,7 @@ export class MessageMonitor {
 
       await this.reportDelivery(message);
       advanceCursor(state, message);
+      marcarEntregue(state, message);
       delete state.deliveredDestinations[message.id];
       await this.store.save(state);
       sent += 1;

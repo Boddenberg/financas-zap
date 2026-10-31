@@ -138,6 +138,10 @@ conversa; os avisos da Casa continuam funcionando.
 ### Confiabilidade que já existe
 
 - **retomada local:** cursores preservam o ponto de leitura após reinícios;
+- **janela para trás:** a leitura volta 15 minutos antes do cursor, para pegar a
+  mensagem com anexo que só vira `pendente` depois de outra mais nova já ter
+  saído; o que já foi entregue fica anotado no estado (48 h) e, se reaparecer,
+  só é confirmado de novo;
 - **idempotência por destino:** uma falha parcial não repete destinatários da
   Casa que o servidor do WhatsApp já confirmou;
 - **ordem de conversa:** uma resposta com falha segura a fila em vez de deixar

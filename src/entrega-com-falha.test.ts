@@ -174,3 +174,61 @@ test("na tentativa seguinte a mensagem sai e é confirmada uma vez só", async (
     assert.deepEqual(inteiro.enviadas, ["5511981090986@c.us"]);
   });
 });
+
+test("a mensagem liberada atrás do cursor sai na Casa, e a já entregue não repete", async () => {
+  await comEstado(async (statePath) => {
+    const t1 = new Date(Date.now() + 1_000).toISOString();
+    const t2 = new Date(Date.now() + 2_000).toISOString();
+    const x: OutboxMessage = { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", content: "com arte", createdAt: t1 };
+    const y: OutboxMessage = { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", content: "só texto", createdAt: t2 };
+    const leituras: Array<{ depoisDe: string; ids: string[] }> = [];
+    const confirmacoes: string[] = [];
+    let pendentes: OutboxMessage[] = [y];
+    let confirmacaoDeYFalha = true;
+    const outbox = {
+      async listMessagesSince(depoisDe: string, ids: string[]) {
+        leituras.push({ depoisDe, ids });
+        return pendentes;
+      },
+      async confirmDelivery(id: string, entregue: boolean) {
+        confirmacoes.push(id);
+        if (id === y.id && confirmacaoDeYFalha) {
+          confirmacaoDeYFalha = false;
+          throw new Error("Supabase fora do ar");
+        }
+        if (entregue) pendentes = pendentes.filter((mensagem) => mensagem.id !== id);
+      },
+    };
+    const enviadas: string[] = [];
+    const cliente = {
+      on() {},
+      off() {},
+      async sendMessage(_destino: string, conteudo: string) {
+        enviadas.push(conteudo);
+        return { id: { _serialized: `wa-${enviadas.length}` }, ack: 1 };
+      },
+    };
+    const store = new StateStore(statePath);
+    const novoMonitor = () =>
+      new MessageMonitor(cliente as never, outbox as never, DESTINO, store, config(statePath));
+    const erro = console.error;
+    const log = console.log;
+    console.error = () => undefined;
+    console.log = () => undefined;
+    try {
+      assert.equal(await novoMonitor().entregarPendentes(), 1);
+
+      pendentes = [x, y];
+      assert.equal(await novoMonitor().entregarPendentes(), 1);
+      assert.equal(await novoMonitor().entregarPendentes(), 0);
+    } finally {
+      console.error = erro;
+      console.log = log;
+    }
+
+    assert.deepEqual(enviadas, ["só texto", "com arte"]);
+    assert.deepEqual(confirmacoes, [y.id, x.id, y.id]);
+    assert.equal(Date.parse(leituras[1]?.depoisDe ?? ""), Date.parse(t2) - 15 * 60 * 1000);
+    assert.deepEqual(leituras[1]?.ids, []);
+  });
+});

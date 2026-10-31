@@ -6,7 +6,24 @@ export type BridgeState = {
   cursorAt: string;
   cursorIds: string[];
   deliveredDestinations: Record<string, string[]>;
+  /**
+   * O que o WhatsApp já aceitou: id → `criada_em` da mensagem. É o que impede
+   * o reenvio quando a leitura volta atrás do cursor (`inicioDaLeitura`).
+   * Opcional porque o estado de antes não o tinha.
+   */
+  entregues?: Record<string, string>;
 };
+
+/**
+ * Quanto a leitura volta antes do cursor. Uma mensagem com anexo nasce
+ * `montando` e só vira `pendente` depois, com o `criada_em` de quando nasceu:
+ * se outra, mais nova, saiu nesse meio-tempo, o cursor já passou por cima dela.
+ * O backend a solta em até 5 minutos (`liberar_presas`); 15 dá folga.
+ */
+export const JANELA_PARA_TRAS_MS = 15 * 60 * 1000;
+
+/** Quanto tempo atrás do cursor uma entrega continua anotada. */
+const GUARDA_DAS_ENTREGUES_MS = 48 * 60 * 60 * 1000;
 
 function isValidDate(value: unknown): value is string {
   return typeof value === "string" && Number.isFinite(Date.parse(value));
@@ -37,6 +54,16 @@ function parseState(value: unknown): BridgeState {
     ) {
       throw new Error("O estado salvo da ponte contém uma entrega inválida.");
     }
+  }
+
+  if (
+    state.entregues !== undefined &&
+    (!state.entregues ||
+      typeof state.entregues !== "object" ||
+      Array.isArray(state.entregues) ||
+      !Object.values(state.entregues).every(isValidDate))
+  ) {
+    throw new Error("O estado salvo da ponte contém uma entrega inválida.");
   }
 
   return state as BridgeState;
@@ -166,5 +193,41 @@ export function advanceCursor(
 
   if (comparison === 0 && !state.cursorIds.includes(message.id)) {
     state.cursorIds.push(message.id);
+  }
+}
+
+/** De onde a leitura começa: um pouco antes do cursor (`JANELA_PARA_TRAS_MS`). */
+export function inicioDaLeitura(state: BridgeState): string {
+  return new Date(Date.parse(state.cursorAt) - JANELA_PARA_TRAS_MS).toISOString();
+}
+
+/**
+ * Se o WhatsApp já aceitou esta mensagem. Os `cursorIds` contam junto: são as
+ * entregas de antes de existir `entregues`, no instante do cursor.
+ */
+export function jaEntregue(
+  state: BridgeState,
+  message: { id: string; createdAt: string },
+): boolean {
+  return (
+    state.entregues?.[message.id] !== undefined ||
+    (Date.parse(message.createdAt) === Date.parse(state.cursorAt) &&
+      state.cursorIds.includes(message.id))
+  );
+}
+
+/** Anota a entrega e esquece as que ficaram 48 h atrás do cursor. */
+export function marcarEntregue(
+  state: BridgeState,
+  message: { id: string; createdAt: string },
+): void {
+  const entregues = (state.entregues ??= {});
+  entregues[message.id] = message.createdAt;
+  const limite = Date.parse(state.cursorAt) - GUARDA_DAS_ENTREGUES_MS;
+
+  for (const [id, criadaEm] of Object.entries(entregues)) {
+    if (Date.parse(criadaEm) < limite) {
+      delete entregues[id];
+    }
   }
 }

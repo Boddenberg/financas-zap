@@ -5,7 +5,10 @@ import path from "node:path";
 import test from "node:test";
 import {
   advanceCursor,
+  inicioDaLeitura,
   isAfterCursor,
+  jaEntregue,
+  marcarEntregue,
   StateStore,
   type BridgeState,
 } from "./state-store";
@@ -135,4 +138,38 @@ test("um rename que falha por outro motivo não é repetido", async () => {
 
   await assert.rejects(store.loadOrCreate(), /no space left/);
   assert.equal(chamadas, 1);
+});
+
+test("as entregas anotadas somem 48 h atrás do cursor e sobrevivem à gravação", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "financas-zap-"));
+  const filePath = path.join(directory, "state.json");
+  const store = new StateStore(filePath);
+  const state = await store.loadOrCreate(new Date("2026-10-31T12:00:00.000Z"));
+
+  marcarEntregue(state, { id: "antiga", createdAt: "2026-10-29T11:00:00.000Z" });
+  marcarEntregue(state, { id: "recente", createdAt: "2026-10-31T11:50:00.000Z" });
+  await store.save(state);
+  const relido = await store.loadOrCreate();
+
+  assert.deepEqual(Object.keys(relido.entregues ?? {}), ["recente"]);
+  assert.equal(jaEntregue(relido, { id: "recente", createdAt: "2026-10-31T11:50:00.000Z" }), true);
+  assert.equal(jaEntregue(relido, { id: "outra", createdAt: "2026-10-31T11:50:00.000Z" }), false);
+  assert.equal(inicioDaLeitura(relido), "2026-10-31T11:45:00.000Z");
+});
+
+test("o estado de antes, sem entregues, continua valendo e conta os cursorIds", async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), "financas-zap-"));
+  const filePath = path.join(directory, "state.json");
+  const antigo = {
+    version: 1,
+    cursorAt: "2026-10-31T12:00:00.000Z",
+    cursorIds: ["no-cursor"],
+    deliveredDestinations: {},
+  };
+  await writeFile(filePath, JSON.stringify(antigo), "utf8");
+
+  const state = await new StateStore(filePath).loadOrCreate();
+
+  assert.equal(state.cursorAt, antigo.cursorAt);
+  assert.equal(jaEntregue(state, { id: "no-cursor", createdAt: "2026-10-31T12:00:00.000Z" }), true);
 });
