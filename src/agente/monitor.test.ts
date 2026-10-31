@@ -44,6 +44,7 @@ function config(statePath: string): AppConfig {
     pollIntervalMs: 15_000,
     agentePollAtivoMs: 2_000,
     agentePollParadoMs: 15_000,
+    agentePulsoMinMs: 60_000,
     timeZone: "America/Sao_Paulo",
   };
 }
@@ -568,5 +569,45 @@ test("uma volta sem rede não encerra o canal", async () => {
 
     assert.equal(leituras, 2);
     assert.deepEqual(enviadas, ["120363411589990438@g.us"]);
+  });
+});
+
+test("o pulso não segue a leitura acelerada: 10 voltas em 20 s dão 1 pulso", async () => {
+  await comPasta(async (statePath) => {
+    let pulsos = 0;
+    let leituras = 0;
+    const entrada = {
+      async pulsar() {
+        pulsos += 1;
+        return { presas: 0, expiradas: 0 };
+      },
+    } as unknown as EntradaDoAgente;
+    const caixa = {
+      async ler() {
+        leituras += 1;
+        return [];
+      },
+      async confirmar() {},
+    } as unknown as CaixaDoAgente;
+    let agora = Date.parse("2026-10-31T12:00:00.000Z");
+    const monitor = new MonitorDoAgente(
+      {} as unknown as Client,
+      caixa,
+      entrada,
+      new StateStore(statePath),
+      config(statePath),
+      { agora: () => agora },
+    );
+
+    for (let volta = 0; volta < 10; volta += 1) {
+      await monitor.bater();
+      agora += 2_000;
+    }
+    assert.equal(leituras, 10, "a leitura continua a cada volta");
+    assert.equal(pulsos, 1);
+
+    agora += 40_000;
+    await monitor.bater();
+    assert.equal(pulsos, 2, "passado um minuto, o pulso volta");
   });
 });

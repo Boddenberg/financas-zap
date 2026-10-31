@@ -29,10 +29,17 @@ function destinoParaLog(jid: string): string {
 const ESPERA_MAXIMA_MS = 2 * 60 * 1000;
 const SUFIXOS_DE_TELEFONE = ["@c.us", "@s.whatsapp.net"];
 
+export type OpcoesDoMonitor = {
+  /** O relógio (testes). */
+  agora?: () => number;
+};
+
 export class MonitorDoAgente {
   private aguardando = 0;
   private aguardandoDesde = 0;
+  private ultimoPulso = Number.NEGATIVE_INFINITY;
   private readonly enderecos = new Map<string, string>();
+  private readonly agora: () => number;
 
   constructor(
     private readonly client: Client,
@@ -40,7 +47,10 @@ export class MonitorDoAgente {
     private readonly entrada: EntradaDoAgente,
     private readonly store: StateStore,
     private readonly config: AppConfig,
-  ) {}
+    opcoes: OpcoesDoMonitor = {},
+  ) {
+    this.agora = opcoes.agora ?? Date.now;
+  }
 
   /**
    * Uma pergunta acabou de ser aceita pelo backend.
@@ -85,7 +95,15 @@ export class MonitorDoAgente {
     return this.entregarPendentes();
   }
 
+  /**
+   * O pulso tem ritmo próprio, no máximo um a cada `agentePulsoMinMs`. Seguir
+   * a leitura (2 s com alguém esperando) batia 30 pulsos por minuto, e cada um
+   * varre todos os módulos do backend.
+   */
   private async pulsar(): Promise<void> {
+    const agora = this.agora();
+    if (agora - this.ultimoPulso < this.config.agentePulsoMinMs) return;
+    this.ultimoPulso = agora;
     try {
       await this.entrada.pulsar();
     } catch (erro) {

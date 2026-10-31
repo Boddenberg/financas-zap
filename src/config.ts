@@ -37,6 +37,8 @@ export type AppConfig = {
   agentePollAtivoMs: number;
   /** Ninguém perguntou nada: o laço cochila. */
   agentePollParadoMs: number;
+  /** O menor intervalo entre dois pulsos do agente, qualquer que seja o ritmo da leitura. */
+  agentePulsoMinMs: number;
   financasApiUrl?: string;
   /** Quais prévias o modo `--demo` pede. `undefined` = números inventados. */
   demoFormats: Array<string | undefined>;
@@ -369,6 +371,10 @@ export function loadConfig(args = process.argv.slice(2)): AppConfig {
     // resposta continua em 2 segundos (`aguardarResposta`), e nada do que sai
     // com o canal parado é urgente ao segundo.
     agentePollParadoMs: readIntervaloDoAgente("AGENTE_POLL_PARADO_MS", 60_000),
+    // A leitura acelera para 2 s com alguém esperando, o pulso não: ele varre
+    // todos os módulos do backend, e nada do que ele faz (órfãs, mensagens
+    // presas, expurgo) amadurece em menos de um minuto.
+    agentePulsoMinMs: readIntervaloDoAgente("AGENTE_PULSO_MIN_MS", 60_000),
     timeZone: validateTimeZone(process.env.APP_TIMEZONE?.trim() || "America/Sao_Paulo"),
     ...watchConfig,
   };
