@@ -10,6 +10,7 @@
     "test:message": "tsx src/index.ts --test-message",
     "list:groups": "tsx src/index.ts --list-groups",
     "test": "tsx --test src/*.test.ts src/agente/*.test.ts",
+    "prebuild": "node scripts/gravar-versao.mjs",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

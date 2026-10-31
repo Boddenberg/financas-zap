@@ -21,6 +21,7 @@ import { MessageMonitor } from "./message-monitor";
 import { claimSingleInstance } from "./single-instance";
 import { StateStore } from "./state-store";
 import { SupabaseOutboxClient } from "./supabase-outbox-client";
+import { descreverVersao } from "./versao";
 import {
   createWhatsAppClient,
   listGroups,
@@ -238,6 +239,7 @@ async function main(): Promise<void> {
   // caminho é o atalho da inicialização, não o .env — que a esta altura ainda
   // nem foi lido.
   mirrorConsoleToFile(process.env.LOG_PATH);
+  console.log(`Finanças Zap ${descreverVersao()} subindo.`);
 
   let config;
 
