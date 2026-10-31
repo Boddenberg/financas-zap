@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Client, MessageMedia } from "whatsapp-web.js";
+import { Client, MessageMedia, WAState } from "whatsapp-web.js";
 
 import type { AppConfig } from "../config";
 import { advanceCursor, isAfterCursor, StateStore } from "../state-store";
@@ -29,6 +29,15 @@ function destinoParaLog(jid: string): string {
 const ESPERA_MAXIMA_MS = 2 * 60 * 1000;
 const SUFIXOS_DE_TELEFONE = ["@c.us", "@s.whatsapp.net"];
 
+/**
+ * A espera antes de tentar de novo uma resposta que falhou: 5 s, 30 s, 2 min e
+ * 5 min. O banco descarta na 5ª falha, e no ritmo de 2 s as cinco iam embora
+ * em 10 s, menos que uma recarga do WhatsApp Web.
+ */
+const ESPERAS_ENTRE_TENTATIVAS_MS = [5_000, 30_000, 2 * 60_000, 5 * 60_000] as const;
+
+type Tentativas = { falhas: number; proxima: number };
+
 export type OpcoesDoMonitor = {
   /** O relógio (testes). */
   agora?: () => number;
@@ -39,6 +48,7 @@ export class MonitorDoAgente {
   private aguardandoDesde = 0;
   private ultimoPulso = Number.NEGATIVE_INFINITY;
   private readonly enderecos = new Map<string, string>();
+  private readonly tentativas = new Map<string, Tentativas>();
   private readonly agora: () => number;
 
   constructor(
@@ -123,21 +133,29 @@ export class MonitorDoAgente {
    *
    * Parar na primeira falha é a outra metade da mesma decisão. É ela que dá
    * sentido ao teto de cinco tentativas do backend: uma resposta envenenada
-   * segura a fila atrás dela por algumas voltas e então é descartada sozinha.
+   * segura a fila atrás dela por uns sete minutos (as esperas de
+   * `ESPERAS_ENTRE_TENTATIVAS_MS`) e então é descartada sozinha.
    * Pular por cima manteria a ordem da conversa quebrada — a resposta de uma
    * pergunta chegando depois da resposta da seguinte.
    */
   private async entregarPendentes(): Promise<number> {
     const estado = await this.store.loadOrCreate();
     let entregues = 0;
+    const lidas = await this.caixa.ler(estado.cursorAt, estado.cursorIds);
+    this.esquecerTentativas(lidas);
 
-    for (const mensagem of await this.caixa.ler(estado.cursorAt, estado.cursorIds)) {
+    for (const mensagem of lidas) {
       if (!isAfterCursor(estado, { id: mensagem.id, createdAt: mensagem.criadaEm })) {
         continue;
+      }
+      // Ainda na espera depois de uma falha: a fila continua parada atrás dela.
+      if ((this.tentativas.get(mensagem.id)?.proxima ?? 0) > this.agora()) {
+        break;
       }
       if (!(await this.enviar(mensagem))) {
         break;
       }
+      this.tentativas.delete(mensagem.id);
       entregues += 1;
       this.aguardando = Math.max(0, this.aguardando - 1);
       advanceCursor(estado, { id: mensagem.id, createdAt: mensagem.criadaEm });
@@ -155,6 +173,19 @@ export class MonitorDoAgente {
       console.error(`Falha ao entregar a resposta ${mensagem.id}: ${motivo}`);
       // O endereço guardado pode ser a causa; a próxima tentativa o refaz.
       this.enderecos.delete(mensagem.jid);
+      if (!(await this.conectado())) {
+        // Com o WhatsApp fora do ar a culpa não é da mensagem: não gasta uma
+        // das cinco tentativas do banco, só espera a primeira pausa.
+        this.tentativas.set(mensagem.id, {
+          falhas: this.tentativas.get(mensagem.id)?.falhas ?? 0,
+          proxima: this.agora() + ESPERAS_ENTRE_TENTATIVAS_MS[0],
+        });
+        return false;
+      }
+      const falhas = (this.tentativas.get(mensagem.id)?.falhas ?? 0) + 1;
+      const espera =
+        ESPERAS_ENTRE_TENTATIVAS_MS[Math.min(falhas, ESPERAS_ENTRE_TENTATIVAS_MS.length) - 1] ?? 0;
+      this.tentativas.set(mensagem.id, { falhas, proxima: this.agora() + espera });
       try {
         await this.caixa.confirmar(mensagem.id, false, motivo);
       } catch (falha) {
@@ -178,6 +209,26 @@ export class MonitorDoAgente {
         `${mensagem.anexos.length ? ` com ${mensagem.anexos.length} anexo(s)` : ""}.`,
     );
     return true;
+  }
+
+  /**
+   * Se o WhatsApp está de pé. Sem como perguntar (a página caiu no meio), a
+   * falha conta, como sempre contou.
+   */
+  private async conectado(): Promise<boolean> {
+    try {
+      return (await this.client.getState()) === WAState.CONNECTED;
+    } catch {
+      return true;
+    }
+  }
+
+  /** A espera de quem saiu da caixa (entregue ou descartada pelo banco) não vale mais. */
+  private esquecerTentativas(lidas: MensagemDaCaixa[]): void {
+    const presentes = new Set(lidas.map((mensagem) => mensagem.id));
+    for (const id of this.tentativas.keys()) {
+      if (!presentes.has(id)) this.tentativas.delete(id);
+    }
   }
 
   /**

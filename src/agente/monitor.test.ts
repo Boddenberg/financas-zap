@@ -470,8 +470,13 @@ test("envio que falha refaz o endereço na próxima tentativa", async () => {
       async confirmar() {},
     } as unknown as CaixaDoAgente;
 
-    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath));
+    // A segunda tentativa só vem depois da primeira espera (5 s).
+    let agora = Date.now();
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath), {
+      agora: () => agora,
+    });
     assert.equal(await monitor.bater(), 0);
+    agora += 5_000;
     assert.equal(await monitor.bater(), 1);
     assert.equal(perguntas, 2);
   });
@@ -609,5 +614,105 @@ test("o pulso não segue a leitura acelerada: 10 voltas em 20 s dão 1 pulso", a
     agora += 40_000;
     await monitor.bater();
     assert.equal(pulsos, 2, "passado um minuto, o pulso volta");
+  });
+});
+
+test("uma falha não queima as cinco tentativas do banco em 10 s", async () => {
+  await comPasta(async (statePath) => {
+    const client = {
+      async getState() {
+        return "CONNECTED";
+      },
+      async sendMessage() {
+        throw new Error("Execution context was destroyed");
+      },
+    } as unknown as Client;
+    const mensagem = resposta("5511946316274@c.us");
+    const confirmadas: boolean[] = [];
+    const caixa = {
+      async ler() {
+        return [mensagem];
+      },
+      async confirmar(_id: string, entregue: boolean) {
+        confirmadas.push(entregue);
+      },
+    } as unknown as CaixaDoAgente;
+    let agora = Date.now();
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath), {
+      agora: () => agora,
+    });
+    const erro = console.error;
+    console.error = () => undefined;
+    try {
+      // Três voltas de 2 s cabem na primeira espera (5 s): uma tentativa só.
+      for (let volta = 0; volta < 3; volta += 1) {
+        await monitor.bater();
+        agora += 2_000;
+      }
+      assert.deepEqual(confirmadas, [false]);
+
+      // Mais duas voltas (5 voltas, 8 s): a segunda tentativa vem aos 6 s.
+      for (let volta = 0; volta < 2; volta += 1) {
+        await monitor.bater();
+        agora += 2_000;
+      }
+      assert.deepEqual(confirmadas, [false, false], "hoje seriam cinco");
+
+      // A seguinte espera 30 s (até os 36 s), e não 2.
+      for (let volta = 0; volta < 13; volta += 1) {
+        await monitor.bater();
+        agora += 2_000;
+      }
+      assert.equal(confirmadas.length, 2);
+      await monitor.bater();
+      assert.equal(confirmadas.length, 3);
+    } finally {
+      console.error = erro;
+    }
+  });
+});
+
+test("com o WhatsApp fora de CONNECTED, a falha não conta como tentativa", async () => {
+  await comPasta(async (statePath) => {
+    let estado = "OPENING";
+    let envios = 0;
+    const client = {
+      async getState() {
+        return estado;
+      },
+      async sendMessage() {
+        envios += 1;
+        throw new Error("o WhatsApp está reconectando");
+      },
+    } as unknown as Client;
+    const confirmadas: boolean[] = [];
+    const caixa = {
+      async ler() {
+        return [resposta("5511946316274@c.us")];
+      },
+      async confirmar(_id: string, entregue: boolean) {
+        confirmadas.push(entregue);
+      },
+    } as unknown as CaixaDoAgente;
+    let agora = Date.now();
+    const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath), {
+      agora: () => agora,
+    });
+    const erro = console.error;
+    console.error = () => undefined;
+    try {
+      for (let volta = 0; volta < 5; volta += 1) {
+        await monitor.bater();
+        agora += 5_000;
+      }
+      assert.equal(envios, 5, "tenta de novo a cada espera curta");
+      assert.deepEqual(confirmadas, [], "nenhuma das cinco tentativas do banco foi gasta");
+
+      estado = "CONNECTED";
+      await monitor.bater();
+      assert.deepEqual(confirmadas, [false]);
+    } finally {
+      console.error = erro;
+    }
   });
 });
