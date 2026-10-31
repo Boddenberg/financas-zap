@@ -62,6 +62,7 @@ prioridade abaixo do normal herdada da tarefa do Windows.
 Antes de concluir:
 
 ```powershell
+npm run verificar   # os quatro abaixo, nessa ordem
 npm test
 npm run typecheck
 npm run build

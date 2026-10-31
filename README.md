@@ -300,7 +300,8 @@ configurado, `WHATSAPP_RECIPIENTS` deixa de ser usado.
 | Comando | O que faz |
 | --- | --- |
 | `npm run dev` | executa o TypeScript em modo contínuo |
-| `npm run build` | compila para `dist/` |
+| `npm run build` | compila para `dist/` e grava o commit em `dist/versao.json` |
+| `npm run verificar` | testes, tipos, build e audit, nessa ordem |
 | `npm start` | executa o build compilado |
 | `npm run test:message` | envia somente `TEST_MESSAGE` aos destinos configurados |
 | `npm run list:groups` | lista os grupos visíveis e seus IDs |
