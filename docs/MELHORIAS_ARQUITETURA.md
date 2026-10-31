@@ -163,7 +163,7 @@ registre o que já foi decidido e o que se faz quando quebrar. Não é burocraci
 
 ### 2.1 Os três arquivos sem teste são exatamente os que orquestram
 
-`index.ts` (457 linhas), `agente/caixa.ts` (146) e `agente/http.ts` (21) são os
+`index.ts` (459 linhas), `agente/caixa.ts` (146) e `agente/http.ts` (21) são os
 únicos sem `.test.ts`. Os dois primeiros não são detalhe: `index.ts` é onde o
 QR, a sessão, o ciclo de vida, o `AbortSignal` e as duas caixas se encontram, e
 `caixa.ts` é a porta do Supabase para o canal do agente — o irmão do
