@@ -29,7 +29,13 @@ if (-not (Test-Path (Join-Path $raiz '.env'))) {
 }
 
 if (-not (Get-Command node.exe -ErrorAction SilentlyContinue)) {
-    throw 'Não achei o node.exe no PATH. Instale o Node.js 20 ou mais recente.'
+    throw 'Não achei o node.exe no PATH. Instale o Node.js 24 ou mais recente.'
+}
+
+# A ponte é testada no Node 24 (.node-version); outra versão só ganha um aviso.
+$versaoDoNode = (& node.exe --version).TrimStart('v')
+if ([int]($versaoDoNode.Split('.')[0]) -lt 24) {
+    Write-Warning "Este computador tem o Node.js $versaoDoNode; a ponte pede o 24 ou mais recente."
 }
 
 if (-not (Test-Path (Join-Path $raiz 'node_modules'))) {
