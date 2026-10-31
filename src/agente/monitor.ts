@@ -9,6 +9,7 @@ import {
   marcarEntregue,
   StateStore,
 } from "../state-store";
+import { estadoComPrazo, PRAZO_DO_ESTADO_MS } from "../whatsapp-client";
 import type { AnexoDaCaixa, CaixaDoAgente, MensagemDaCaixa } from "./caixa";
 import type { EntradaDoAgente } from "./entrada";
 
@@ -44,9 +45,16 @@ const ESPERAS_ENTRE_TENTATIVAS_MS = [5_000, 30_000, 2 * 60_000, 5 * 60_000] as c
 
 type Tentativas = { falhas: number; proxima: number };
 
+/** Os estados conhecidos de WhatsApp fora do ar: neles a falha não é da mensagem. */
+const ESTADOS_FORA_DO_AR: ReadonlySet<string> = new Set(
+  Object.values(WAState).filter((estado) => estado !== WAState.CONNECTED),
+);
+
 export type OpcoesDoMonitor = {
   /** O relógio (testes). */
   agora?: () => number;
+  /** Quanto se espera a página dizer o estado (testes). */
+  prazoDoEstadoMs?: number;
 };
 
 export class MonitorDoAgente {
@@ -56,6 +64,7 @@ export class MonitorDoAgente {
   private readonly enderecos = new Map<string, string>();
   private readonly tentativas = new Map<string, Tentativas>();
   private readonly agora: () => number;
+  private readonly prazoDoEstadoMs: number;
 
   constructor(
     private readonly client: Client,
@@ -66,6 +75,7 @@ export class MonitorDoAgente {
     opcoes: OpcoesDoMonitor = {},
   ) {
     this.agora = opcoes.agora ?? Date.now;
+    this.prazoDoEstadoMs = opcoes.prazoDoEstadoMs ?? PRAZO_DO_ESTADO_MS;
   }
 
   /**
@@ -228,15 +238,12 @@ export class MonitorDoAgente {
   }
 
   /**
-   * Se o WhatsApp está de pé. Sem como perguntar (a página caiu no meio), a
-   * falha conta, como sempre contou.
+   * Se a falha conta. Só não conta num estado conhecido de WhatsApp fora do ar;
+   * página muda (prazo curto), erro, `null` ou estado novo contam, como sempre.
    */
   private async conectado(): Promise<boolean> {
-    try {
-      return (await this.client.getState()) === WAState.CONNECTED;
-    } catch {
-      return true;
-    }
+    const estado = await estadoComPrazo(this.client, this.prazoDoEstadoMs);
+    return !(typeof estado === "string" && ESTADOS_FORA_DO_AR.has(estado));
   }
 
   /** A espera de quem saiu da caixa (entregue ou descartada pelo banco) não vale mais. */

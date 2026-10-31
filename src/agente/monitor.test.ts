@@ -717,6 +717,43 @@ test("com o WhatsApp fora de CONNECTED, a falha não conta como tentativa", asyn
   });
 });
 
+test("estado que não diz fora do ar (null, novo ou página muda) conta a falha", async () => {
+  for (const getState of [
+    async () => null,
+    async () => "ESTADO_DE_UMA_VERSAO_NOVA",
+    () => new Promise(() => undefined),
+  ]) {
+    await comPasta(async (statePath) => {
+      const client = {
+        getState,
+        async sendMessage() {
+          throw new Error("Execution context was destroyed");
+        },
+      } as unknown as Client;
+      const confirmadas: boolean[] = [];
+      const caixa = {
+        async ler() {
+          return [resposta("5511946316274@c.us")];
+        },
+        async confirmar(_id: string, entregue: boolean) {
+          confirmadas.push(entregue);
+        },
+      } as unknown as CaixaDoAgente;
+      const monitor = new MonitorDoAgente(client, caixa, entradaFalsa, new StateStore(statePath), config(statePath), {
+        prazoDoEstadoMs: 10,
+      });
+      const erro = console.error;
+      console.error = () => undefined;
+      try {
+        await monitor.bater();
+      } finally {
+        console.error = erro;
+      }
+      assert.deepEqual(confirmadas, [false], "sem um estado de fora do ar, a tentativa conta");
+    });
+  }
+});
+
 test("a mensagem com anexo liberada atrás do cursor ainda sai, uma vez só", async () => {
   await comPasta(async (statePath) => {
     const { client, enviadas } = clienteFalso();
