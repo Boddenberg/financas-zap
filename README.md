@@ -400,8 +400,9 @@ acompanha dependências npm e as Actions usadas pelo repositório.
   conexão da máquina.
 - **Sessão corrompida:** pare a ponte, preserve os arquivos para diagnóstico se
   necessário, remova `.wwebjs_auth/` e `.wwebjs_cache/` e pareie novamente.
-- **Estado local inválido:** preserve o JSON para diagnóstico. Apagá-lo faz a
-  ponte recomeçar no horário atual e perder a recuperação do intervalo anterior.
+- **Estado local inválido:** a ponte guarda o JSON ilegível ao lado, como
+  `<arquivo>.corrompido-<data>`, e recomeça no horário atual. Preserve esse
+  arquivo para diagnóstico; o intervalo anterior não é recuperado.
 
 </details>
 

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type BridgeState = {
@@ -42,13 +42,38 @@ function parseState(value: unknown): BridgeState {
   return state as BridgeState;
 }
 
-export class StateStore {
-  constructor(private readonly filePath: string) {}
+/** Erros de um arquivo preso por outro processo (antivírus, indexador do Windows). */
+const ARQUIVO_PRESO = new Set(["EPERM", "EACCES", "EBUSY"]);
+const ESPERAS_DO_RENAME_MS = [100, 500];
 
+type Renomear = (de: string, para: string) => Promise<void>;
+
+export type OpcoesDoEstado = {
+  /** Troca o `rename` do disco (testes). */
+  renomear?: Renomear;
+};
+
+export class StateStore {
+  private readonly renomear: Renomear;
+
+  constructor(
+    private readonly filePath: string,
+    opcoes: OpcoesDoEstado = {},
+  ) {
+    this.renomear = opcoes.renomear ?? rename;
+  }
+
+  /**
+   * O estado salvo, ou um novo com o cursor em `now`.
+   *
+   * Um arquivo ilegível (queda de energia no meio de uma gravação antiga, edição
+   * à mão) não segura a ponte fora do ar: ele é guardado ao lado como
+   * `.corrompido-<data>` e o estado recomeça, como num primeiro início.
+   */
   async loadOrCreate(now = new Date()): Promise<BridgeState> {
+    let contents: string | undefined;
     try {
-      const contents = await readFile(this.filePath, "utf8");
-      return parseState(JSON.parse(contents) as unknown);
+      contents = await readFile(this.filePath, "utf8");
     } catch (error) {
       const filesystemError = error as NodeJS.ErrnoException;
 
@@ -57,6 +82,20 @@ export class StateStore {
           `Não foi possível ler o estado da ponte em ${this.filePath}: ${
             error instanceof Error ? error.message : String(error)
           }`,
+        );
+      }
+    }
+
+    if (contents !== undefined) {
+      try {
+        return parseState(JSON.parse(contents) as unknown);
+      } catch (error) {
+        const guardado = `${this.filePath}.corrompido-${carimbo(now)}`;
+        await this.renomear(this.filePath, guardado);
+        console.error(
+          `O estado da ponte em ${this.filePath} estava ilegível (${
+            error instanceof Error ? error.message : String(error)
+          }); guardado em ${guardado} e recomeçado.`,
         );
       }
     }
@@ -71,13 +110,38 @@ export class StateStore {
     return state;
   }
 
+  /**
+   * Grava num `.tmp` e troca pelo arquivo final com `rename`, que substitui de
+   * uma vez: uma queda no meio deixa o estado anterior inteiro, nunca a metade.
+   */
   async save(state: BridgeState): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
-    await writeFile(this.filePath, `${JSON.stringify(state, null, 2)}\n`, {
+    const temporario = `${this.filePath}.tmp`;
+    await writeFile(temporario, `${JSON.stringify(state, null, 2)}\n`, {
       encoding: "utf8",
       mode: 0o600,
     });
+    await this.trocar(temporario);
   }
+
+  private async trocar(temporario: string): Promise<void> {
+    for (let tentativa = 0; ; tentativa += 1) {
+      try {
+        await this.renomear(temporario, this.filePath);
+        return;
+      } catch (error) {
+        const espera = ESPERAS_DO_RENAME_MS[tentativa];
+        const codigo = (error as NodeJS.ErrnoException).code;
+        if (espera === undefined || !codigo || !ARQUIVO_PRESO.has(codigo)) throw error;
+        await new Promise((resolver) => setTimeout(resolver, espera));
+      }
+    }
+  }
+}
+
+/** A data num nome de arquivo que o Windows aceita (sem `:`). */
+function carimbo(data: Date): string {
+  return data.toISOString().replace(/[:.]/g, "-");
 }
 
 export function isAfterCursor(
