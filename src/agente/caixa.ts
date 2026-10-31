@@ -1,4 +1,5 @@
 import type { AppConfig } from "../config";
+import { chamarComPrazo, lotePedeMenos, PRAZO_DO_CORPO_MS } from "../supabase-prazo";
 import { erroDaResposta } from "./http";
 
 /**
@@ -15,9 +16,6 @@ import { erroDaResposta } from "./http";
 
 /** Quantas mensagens cada leitura pede, do lote cheio ao de uma só (ver `lerEmLote`). */
 const LOTES = [50, 10, 3, 1] as const;
-
-/** Quanto uma chamada ao Supabase pode demorar. */
-const PRAZO_DO_SUPABASE_MS = 30_000;
 
 export type AnexoDaCaixa = {
   nome: string;
@@ -76,14 +74,16 @@ export class CaixaDoAgente {
   private readonly supabaseUrl: string;
   private readonly anonKey: string;
   private readonly chave: string;
+  private readonly prazoDoCorpoMs: number;
 
-  constructor(config: AppConfig) {
+  constructor(config: AppConfig, opcoes: { prazoDoCorpoMs?: number } = {}) {
     if (!config.supabaseUrl || !config.supabaseAnonKey || !config.agenteChave) {
       throw new Error("A configuração da caixa do agente está incompleta.");
     }
     this.supabaseUrl = config.supabaseUrl;
     this.anonKey = config.supabaseAnonKey;
     this.chave = config.agenteChave;
+    this.prazoDoCorpoMs = opcoes.prazoDoCorpoMs ?? PRAZO_DO_CORPO_MS;
   }
 
   /** Uma leitura vazia no início: confirma a chave antes de o laço começar. */
@@ -140,37 +140,37 @@ export class CaixaDoAgente {
    * do Huntrack traz vídeo e foto. Com a fila acumulada (a ponte ficou fora de
    * 09/10 a 12/10/2026), cinquenta linhas assim estouravam o `statement
    * timeout` a cada volta, e a fila inteira parou atrás delas. Menos linhas
-   * por vez entregam o mesmo, só em mais voltas.
+   * por vez entregam o mesmo, só em mais voltas. Um corpo que não desce no
+   * prazo (link lento) também desce de lote; o cabeçalho que não vem, não.
    */
   private async lerEmLote(argumentos: Record<string, unknown>): Promise<unknown> {
     for (const [i, limite] of LOTES.entries()) {
       try {
         return await this.rpc("ler_caixa_whatsapp", { ...argumentos, p_limite: limite });
       } catch (erro) {
-        const estourou = erro instanceof Error && /statement timeout/i.test(erro.message);
-        if (!estourou || i === LOTES.length - 1) throw erro;
+        if (!lotePedeMenos(erro) || i === LOTES.length - 1) throw erro;
       }
     }
     return [];
   }
 
   private async rpc(funcao: string, argumentos: Record<string, unknown>): Promise<unknown> {
-    const resposta = await fetch(`${this.supabaseUrl}/rest/v1/rpc/${funcao}`, {
-      method: "POST",
-      headers: { apikey: this.anonKey, "Content-Type": "application/json" },
-      body: JSON.stringify(argumentos),
-      // Sem prazo o `fetch` espera até 5 minutos pelo cabeçalho, e a escada de
-      // lotes multiplica isso por quatro. O estouro daqui não desce de lote: a
-      // mensagem não é a do `statement timeout`.
-      signal: AbortSignal.timeout(PRAZO_DO_SUPABASE_MS),
-    });
-
-    if (!resposta.ok) {
-      throw new Error(
-        `Não foi possível falar com a caixa do agente (${funcao}): ${await erroDaResposta(resposta)}`,
-      );
-    }
-
-    return (await resposta.json()) as unknown;
+    return chamarComPrazo(
+      `${this.supabaseUrl}/rest/v1/rpc/${funcao}`,
+      {
+        method: "POST",
+        headers: { apikey: this.anonKey, "Content-Type": "application/json" },
+        body: JSON.stringify(argumentos),
+      },
+      async (resposta) => {
+        if (!resposta.ok) {
+          throw new Error(
+            `Não foi possível falar com a caixa do agente (${funcao}): ${await erroDaResposta(resposta)}`,
+          );
+        }
+        return (await resposta.json()) as unknown;
+      },
+      this.prazoDoCorpoMs,
+    );
   }
 }

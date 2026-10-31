@@ -80,3 +80,49 @@ test("um Supabase que não responde solta a volta com erro", async (t) => {
 
   await assert.rejects(new CaixaDoAgente(config).ler("2026-10-08T00:00:00Z", []), /prazo/);
 });
+
+/** Uma resposta que manda o cabeçalho e o começo do corpo e para ali, até o prazo cortar. */
+function corpoQueNaoTermina(sinal: AbortSignal): Response {
+  const corpo = new ReadableStream<Uint8Array>({
+    start(controle) {
+      controle.enqueue(new TextEncoder().encode("["));
+      sinal.addEventListener("abort", () => controle.error(sinal.reason));
+    },
+  });
+  return new Response(corpo, { status: 200 });
+}
+
+test("um lote que não desce no prazo do corpo (link lento) vira lote menor", async (t) => {
+  const pedidos: number[] = [];
+  t.mock.method(globalThis, "fetch", async (_url: string, init: { body: string; signal: AbortSignal }) => {
+    const limite = JSON.parse(init.body).p_limite as number;
+    pedidos.push(limite);
+    if (limite > 10) return corpoQueNaoTermina(init.signal);
+    return new Response(JSON.stringify([linha("a")]), { status: 200 });
+  });
+
+  const lidas = await new CaixaDoAgente(config, { prazoDoCorpoMs: 20 }).ler("2026-10-08T00:00:00Z", []);
+
+  assert.deepEqual(pedidos, [50, 10]);
+  assert.deepEqual(lidas.map((m) => m.id), ["a"]);
+});
+
+test("o prazo de 30 s é só do cabeçalho: o corpo que chega depois dele ainda vale", async (t) => {
+  const timeout = AbortSignal.timeout.bind(AbortSignal);
+  t.mock.method(AbortSignal, "timeout", () => timeout(10));
+  t.mock.method(globalThis, "fetch", async (_url: string, init: { signal: AbortSignal }) => {
+    const corpo = new ReadableStream<Uint8Array>({
+      start(controle) {
+        init.signal.addEventListener("abort", () => controle.error(init.signal.reason));
+        setTimeout(() => {
+          controle.enqueue(new TextEncoder().encode(JSON.stringify([linha("a")])));
+          controle.close();
+        }, 40);
+      },
+    });
+    return new Response(corpo, { status: 200 });
+  });
+
+  const lidas = await new CaixaDoAgente(config).ler("2026-10-08T00:00:00Z", []);
+  assert.deepEqual(lidas.map((m) => m.id), ["a"]);
+});
