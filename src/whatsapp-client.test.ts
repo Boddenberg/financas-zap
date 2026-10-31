@@ -4,6 +4,7 @@ import test from "node:test";
 import type { Client } from "whatsapp-web.js";
 import type { AppConfig } from "./config";
 import {
+  argumentosDoChromium,
   createWhatsAppClient,
   protectEventAttachmentFromNavigation,
   protectReadyFromEarlySync,
@@ -300,4 +301,18 @@ test("o GIF, que já tem prazo próprio, fica fora do vigia", async () => {
   assert.deepEqual(travas, []);
   soltar?.();
   await gif;
+});
+
+test("o sandbox do Chromium só sai no Linux", () => {
+  const semSandbox = ["--no-sandbox", "--disable-setuid-sandbox"];
+
+  for (const plataforma of ["win32", "darwin"] as const) {
+    const args = argumentosDoChromium(plataforma);
+    assert.deepEqual(args.filter((argumento) => semSandbox.includes(argumento)), [], plataforma);
+    assert.ok(args.includes("--renderer-process-limit=1"), plataforma);
+  }
+
+  const linux = argumentosDoChromium("linux");
+  assert.deepEqual(linux.slice(0, 2), semSandbox);
+  assert.ok(linux.includes("--renderer-process-limit=1"));
 });

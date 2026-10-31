@@ -230,8 +230,6 @@ function sameBrazilianNumber(first: string, second: string): boolean {
  * ocorrência da chave e a lista padrão do Puppeteer seria descartada junto.
  */
 const CHROMIUM_ENXUTO = [
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
   "--disable-dev-shm-usage",
   // Sem GPU e sem o rasterizador por software, que subiria um processo só para
   // desenhar uma página que ninguém olha.
@@ -248,6 +246,19 @@ const CHROMIUM_ENXUTO = [
   "--media-cache-size=16777216",
 ];
 
+/**
+ * Os argumentos do Chromium nesta plataforma.
+ *
+ * Sem sandbox só no Linux, onde ele roda como root ou em contêiner (o CI). No
+ * Windows a tarefa roda como usuário comum, e o WhatsApp Web desenha conteúdo
+ * de qualquer um que escreva para o chip: ali o sandbox fica ligado.
+ */
+export function argumentosDoChromium(plataforma: NodeJS.Platform = process.platform): string[] {
+  return plataforma === "linux"
+    ? ["--no-sandbox", "--disable-setuid-sandbox", ...CHROMIUM_ENXUTO]
+    : [...CHROMIUM_ENXUTO];
+}
+
 export function createWhatsAppClient(config: AppConfig): Client {
   const client = new Client({
     authStrategy: new LocalAuth({
@@ -260,7 +271,7 @@ export function createWhatsAppClient(config: AppConfig): Client {
     puppeteer: {
       headless: config.headless,
       ...(config.chromePath ? { executablePath: config.chromePath } : {}),
-      args: [...CHROMIUM_ENXUTO],
+      args: argumentosDoChromium(),
     },
   });
 
