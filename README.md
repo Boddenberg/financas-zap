@@ -18,7 +18,7 @@
     <img alt="Pipeline de qualidade" src="https://img.shields.io/github/actions/workflow/status/Boddenberg/financas-zap/quality.yml?branch=main&style=for-the-badge&logo=githubactions&logoColor=white&label=qualidade" />
   </a>
   <img alt="Node.js 24" src="https://img.shields.io/badge/Node.js-24-339933?style=for-the-badge&logo=nodedotjs&logoColor=white" />
-  <img alt="TypeScript 5.9" src="https://img.shields.io/badge/TypeScript-5.9-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
+  <img alt="TypeScript 7.0" src="https://img.shields.io/badge/TypeScript-7.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white" />
   <img alt="WhatsApp Web.js 1.34" src="https://img.shields.io/badge/whatsapp--web.js-1.34-25D366?style=for-the-badge&logo=whatsapp&logoColor=white" />
 </p>
 
@@ -149,7 +149,7 @@ conversa; os avisos da Casa continuam funcionando.
 - **instância única:** um lock por PID impede duas pontes de dividirem o mesmo
   perfil e a mesma sessão;
 - **ritmo adaptativo:** o agente consulta a cada 2 s enquanto alguém aguarda e a
-  cada 15 s quando está ocioso;
+  cada 60 s quando está ocioso; o pulso dele bate no máximo uma vez por minuto;
 - **observação sem janela:** o diário rotativo tem teto de 512 KB e uma cópia
   anterior;
 - **um fio entre as duas máquinas:** cada mensagem entregue leva um
@@ -167,8 +167,8 @@ conversa; os avisos da Casa continuam funcionando.
 
 | Tecnologia | Papel no projeto |
 | --- | --- |
-| **Node.js 24** | runtime recomendado; o pacote aceita `>=20.9.0` |
-| **TypeScript 5.9** | código estrito, ES2022 e módulos Node16 |
+| **Node.js 24** | runtime da ponte (`.node-version` e `engines`) |
+| **TypeScript 7.0** | código estrito, ES2022 e módulos Node16 |
 | **whatsapp-web.js 1.34** | adaptador da sessão e das mensagens do WhatsApp Web |
 | **Puppeteer + Chromium** | navegador local usado indiretamente pelo `whatsapp-web.js` |
 | **Supabase REST/RPC** | caixas de saída, leitura e confirmação de entregas |
@@ -193,7 +193,7 @@ conversa; os avisos da Casa continuam funcionando.
 ### Pré-requisitos
 
 - Windows 10 ou 11 para a automação oficial de inicialização;
-- Node.js 24 recomendado — ou qualquer versão compatível com `>=20.9.0`;
+- Node.js 24 ou mais recente;
 - um celular com WhatsApp para parear a sessão local;
 - URL e chave pública `anon` do Supabase usado pelo Finanças;
 - API do Finanças disponível;

@@ -163,7 +163,7 @@ registre o que já foi decidido e o que se faz quando quebrar. Não é burocraci
 
 ### 2.1 Os três arquivos sem teste são exatamente os que orquestram
 
-`index.ts` (367 linhas), `agente/caixa.ts` (146) e `agente/http.ts` (21) são os
+`index.ts` (457 linhas), `agente/caixa.ts` (146) e `agente/http.ts` (21) são os
 únicos sem `.test.ts`. Os dois primeiros não são detalhe: `index.ts` é onde o
 QR, a sessão, o ciclo de vida, o `AbortSignal` e as duas caixas se encontram, e
 `caixa.ts` é a porta do Supabase para o canal do agente — o irmão do
@@ -188,8 +188,10 @@ O `http.ts` pode ficar sem: são 21 linhas de formatação de erro.
 ### 2.2 O ritmo de 2 segundos custa mais do que parece
 
 `agente/monitor.ts` alterna entre `AGENTE_POLL_ATIVO_MS` (2.000) quando alguém
-espera resposta e `AGENTE_POLL_PARADO_MS` (15.000) quando não. O canal da Casa
-tem seu próprio `POLL_INTERVAL_SECONDS` (60).
+espera resposta e `AGENTE_POLL_PARADO_MS` (60.000; eram 15.000 quando este
+texto foi escrito) quando não. O pulso do agente tem ritmo próprio, no máximo
+um a cada `AGENTE_PULSO_MIN_MS` (60.000). O canal da Casa tem seu próprio
+`POLL_INTERVAL_SECONDS` (60).
 
 A escolha é bem justificada — uma resposta que demora 15 segundos para aparecer
 depois de pronta parece travada. Mas o `AGENTS.md` tem uma seção chamada "Peso"
