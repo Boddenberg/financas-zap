@@ -18,6 +18,7 @@
     "windows:instalar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/instalar-inicializacao.ps1",
     "windows:situacao": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/situacao.ps1",
     "windows:remover": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/remover-inicializacao.ps1",
+    "windows:atualizar": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/atualizar.ps1",
     "postinstall": "node scripts/corrigir-wwebjs-midia.mjs",
     "auditar": "node .github/auditar.mjs",
     "verificar": "npm test && npm run typecheck && npm run build && npm run auditar"

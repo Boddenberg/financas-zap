@@ -311,6 +311,7 @@ configurado, `WHATSAPP_RECIPIENTS` deixa de ser usado.
 | `npm run windows:instalar` | compila e instala a inicialização automática |
 | `npm run windows:situacao` | mostra tarefa, uptime, memória e últimas linhas do diário |
 | `npm run windows:remover` | remove a tarefa sem apagar sessão nem cursor |
+| `npm run windows:atualizar` | para a tarefa, `git pull --ff-only`, `npm ci`, build e sobe a tarefa de novo |
 
 As prévias reais usam o histórico, mas são enfileiradas como demonstração e não
 consomem o resumo do período.
