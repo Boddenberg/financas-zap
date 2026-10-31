@@ -26,6 +26,7 @@ import {
   listGroups,
   resolveDestinations,
   sendTestMessage,
+  vigiarEnvios,
 } from "./whatsapp-client";
 
 function errorMessage(error: unknown): string {
@@ -274,6 +275,15 @@ async function main(): Promise<void> {
 
   const abortController = new AbortController();
   const client = createWhatsAppClient(config);
+  vigiarEnvios(client, (motivo) => {
+    console.error(`${motivo} Encerrando para o financas-zap.vbs subir a ponte de novo.`);
+    process.exitCode = 1;
+    // O laço está preso no envio e nunca chega ao `finally` de `main`: o Chrome
+    // e a trava saem daqui, e um Chrome esquecido seguraria o perfil.
+    client.pupBrowser?.process()?.kill();
+    releaseSingleInstance();
+    process.exit(1);
+  });
   const stateStore = new StateStore(config.statePath);
   let disconnectedReason: unknown;
   // O Chrome fechou ou a página do WhatsApp caiu depois de pronta. Sem isto os

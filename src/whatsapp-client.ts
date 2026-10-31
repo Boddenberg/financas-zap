@@ -269,6 +269,43 @@ export function createWhatsAppClient(config: AppConfig): Client {
   return client;
 }
 
+/** Quanto um envio pode ficar sem voltar antes de a ponte se dar por travada. */
+export const ENVIO_TRAVADO_MS = 3 * 60 * 1000;
+
+/**
+ * Um `sendMessage` que não volta é um WhatsApp Web travado: o processo segue
+ * "em execução" e nada mais sai. Passado `limiteMs`, `aoTravar` encerra a
+ * ponte e o `financas-zap.vbs` sobe outra. Isso é melhor que um prazo por
+ * envio, que desistiria de uma mensagem que ainda pode sair e a mandaria duas
+ * vezes na nova tentativa.
+ *
+ * O GIF fica de fora: ele já tem prazo próprio no canal do agente, que manda
+ * a foto de reserva, e essa foto é vigiada como qualquer outro envio.
+ */
+export function vigiarEnvios(
+  client: Client,
+  aoTravar: (motivo: string) => void,
+  limiteMs = ENVIO_TRAVADO_MS,
+): void {
+  const enviar = client.sendMessage.bind(client);
+
+  client.sendMessage = (async (destino, conteudo, opcoes) => {
+    if (opcoes?.sendVideoAsGif) {
+      return enviar(destino, conteudo, opcoes);
+    }
+
+    const relogio = setTimeout(() => {
+      aoTravar(`Um envio ao WhatsApp passou de ${limiteMs / 1000} s sem voltar.`);
+    }, limiteMs);
+
+    try {
+      return await enviar(destino, conteudo, opcoes);
+    } finally {
+      clearTimeout(relogio);
+    }
+  }) as Client["sendMessage"];
+}
+
 function acknowledgementDescription(ack: MessageAck): string {
   if (ack >= MessageAck.ACK_READ) {
     return "leitura confirmada";

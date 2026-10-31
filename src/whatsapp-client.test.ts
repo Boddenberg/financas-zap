@@ -9,6 +9,7 @@ import {
   protectReadyFromEarlySync,
   resolveDestinations,
   sendAndWaitForServerAcknowledgement,
+  vigiarEnvios,
 } from "./whatsapp-client";
 
 function configWithPhones(...targetPhones: string[]): AppConfig {
@@ -249,4 +250,54 @@ test("não chama o aviso enquanto o WhatsApp ainda não sincronizou", async () =
   await terminar();
 
   assert.deepEqual(chamadas, ["conferir"]);
+});
+
+test("um envio que não volta encerra a ponte; os que voltam, não", async () => {
+  const travas: string[] = [];
+  let soltar: (() => void) | undefined;
+  const client = {
+    async sendMessage(_destino: string, conteudo: string) {
+      if (conteudo === "rapido") return { id: { _serialized: "ok" } };
+      await new Promise<void>((resolver) => {
+        soltar = resolver;
+      });
+      return { id: { _serialized: "tarde" } };
+    },
+  } as unknown as Client;
+
+  vigiarEnvios(client, (motivo) => travas.push(motivo), 20);
+
+  assert.deepEqual(await client.sendMessage("5511999999999@c.us", "rapido"), {
+    id: { _serialized: "ok" },
+  });
+  await new Promise((resolver) => setTimeout(resolver, 40));
+  assert.deepEqual(travas, [], "envio que voltou não conta");
+
+  const preso = client.sendMessage("5511999999999@c.us", "preso");
+  await new Promise((resolver) => setTimeout(resolver, 40));
+  assert.equal(travas.length, 1);
+  assert.match(travas[0] ?? "", /sem voltar/);
+
+  soltar?.();
+  await preso;
+});
+
+test("o GIF, que já tem prazo próprio, fica fora do vigia", async () => {
+  const travas: string[] = [];
+  let soltar: (() => void) | undefined;
+  const client = {
+    async sendMessage() {
+      await new Promise<void>((resolver) => {
+        soltar = resolver;
+      });
+    },
+  } as unknown as Client;
+
+  vigiarEnvios(client, (motivo) => travas.push(motivo), 20);
+  const gif = client.sendMessage("5511999999999@c.us", "video", { sendVideoAsGif: true });
+  await new Promise((resolver) => setTimeout(resolver, 40));
+
+  assert.deepEqual(travas, []);
+  soltar?.();
+  await gif;
 });
