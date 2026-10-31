@@ -15,8 +15,10 @@ import path from "node:path";
  * A trava é o PID em arquivo. Se o processo anotado não existe mais, ela é de
  * quem chegou agora: um desligamento abrupto não pode deixar a ponte impedida
  * de voltar. Trava anotada antes de o computador ligar também é velha: o
- * Windows reaproveita PIDs, e depois de um desligamento o número anotado pode
- * ser de outro processo qualquer.
+ * Windows reaproveita PIDs, e depois de uma queda de energia ou de um reinício
+ * o número anotado pode ser de outro processo qualquer. O "Desligar" com a
+ * Inicialização Rápida hiberna o kernel e não zera o `uptime`: ali a trava
+ * ainda depende do PID.
  */
 
 export type OpcoesDaTrava = {
