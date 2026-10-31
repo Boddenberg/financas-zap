@@ -11,6 +11,11 @@ const EXCECOES = {
   // e a ponte abre o Chrome do computador (`WHATSAPP_CHROME`, `config.ts`).
   "GHSA-jmr9-qjv8-65gv": "extract-zip sem correção; só na instalação do Puppeteer",
   "GHSA-7pqw-9j4j-h8q3": "extract-zip sem correção; só na instalação do Puppeteer",
+  // zod 3.x: a correção só existe no 4.x, de API diferente (não forçar por
+  // `overrides`). Chega por puppeteer → chromium-bidi, que o Puppeteer só
+  // carrega com o protocolo WebDriver BiDi (`BrowserLauncher.js`); o
+  // whatsapp-web.js fala CDP com o Chrome, então o zod não roda na ponte.
+  "GHSA-mrhx-c7xc-m3w5": "zod sem correção no 3.x; só no WebDriver BiDi, que a ponte não usa",
 };
 const GRAVES = new Set(["high", "critical"]);
 
